@@ -17,22 +17,24 @@ import {
   sortableKeyboardCoordinates,
   verticalListSortingStrategy
 } from '@dnd-kit/sortable';
-import { Plus, Inbox, Loader2, Eye, CheckCircle2, Archive } from 'lucide-react';
+import { Plus, Inbox, Loader2, Eye, CheckCircle2, Archive, RefreshCw } from 'lucide-react';
 import { ScrollArea } from './ui/scroll-area';
 import { Button } from './ui/button';
 import { Checkbox } from './ui/checkbox';
 import { Label } from './ui/label';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { TaskCard } from './TaskCard';
 import { SortableTaskCard } from './SortableTaskCard';
 import { TASK_STATUS_COLUMNS, TASK_STATUS_LABELS } from '../../shared/constants';
 import { cn } from '../lib/utils';
-import { persistTaskStatus, archiveTasks } from '../stores/task-store';
+import { persistTaskStatus, archiveTasks, loadTasks, useTaskStore } from '../stores/task-store';
 import type { Task, TaskStatus } from '../../shared/types';
 
 interface KanbanBoardProps {
   tasks: Task[];
   onTaskClick: (task: Task) => void;
   onNewTaskClick?: () => void;
+  projectId?: string;
 }
 
 interface DroppableColumnProps {
@@ -209,10 +211,16 @@ function DroppableColumn({ status, tasks, onTaskClick, isOver, onAddClick, onArc
   );
 }
 
-export function KanbanBoard({ tasks, onTaskClick, onNewTaskClick }: KanbanBoardProps) {
+export function KanbanBoard({ tasks, onTaskClick, onNewTaskClick, projectId }: KanbanBoardProps) {
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [overColumnId, setOverColumnId] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+
+  // Get loading state for refresh button
+  const isLoading = useTaskStore((state) => state.isLoading);
+
+  // Derive projectId from tasks if not provided
+  const effectiveProjectId = projectId || tasks[0]?.projectId;
 
   // Count archived tasks for display
   const archivedCount = useMemo(() => {
@@ -226,6 +234,14 @@ export function KanbanBoard({ tasks, onTaskClick, onNewTaskClick }: KanbanBoardP
     }
     return tasks.filter((t) => !t.metadata?.archivedAt);
   }, [tasks, showArchived]);
+
+  const handleRefresh = async () => {
+    if (!effectiveProjectId) {
+      console.error('No projectId available for refresh');
+      return;
+    }
+    await loadTasks(effectiveProjectId);
+  };
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -339,6 +355,22 @@ export function KanbanBoard({ tasks, onTaskClick, onNewTaskClick }: KanbanBoardP
       {/* Kanban header with filters */}
       <div className="flex items-center justify-end px-6 py-3 border-b border-border/50">
         <div className="flex items-center gap-2">
+          {/* Refresh button */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={handleRefresh}
+                disabled={isLoading || !effectiveProjectId}
+              >
+                <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Refresh task list</TooltipContent>
+          </Tooltip>
+
+          {/* Existing archived checkbox */}
           <Checkbox
             id="showArchived"
             checked={showArchived}

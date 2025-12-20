@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useRoadmapStore, loadRoadmap, generateRoadmap, refreshRoadmap, stopRoadmap } from '../../stores/roadmap-store';
-import { useTaskStore } from '../../stores/task-store';
+import { useTaskStore, loadTasks } from '../../stores/task-store';
 import type { RoadmapFeature } from '../../../shared/types';
 
 /**
@@ -60,6 +60,8 @@ export function useFeatureActions() {
           status: 'planned',
         });
       }
+      // FIX: Reload tasks to show new task in Kanban board immediately
+      loadTasks(projectId);
     }
   };
 
