@@ -97,7 +97,39 @@ export class AgentProcessManager {
   }
 
   /**
-   * Load environment variables from auto-claude .env file
+   * Parse .env file content into key-value pairs
+   */
+  private parseEnvFile(envContent: string): Record<string, string> {
+    const envVars: Record<string, string> = {};
+
+    // Handle both Unix (\n) and Windows (\r\n) line endings
+    for (const line of envContent.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      // Skip comments and empty lines
+      if (!trimmed || trimmed.startsWith('#')) {
+        continue;
+      }
+
+      const eqIndex = trimmed.indexOf('=');
+      if (eqIndex > 0) {
+        const key = trimmed.substring(0, eqIndex).trim();
+        let value = trimmed.substring(eqIndex + 1).trim();
+
+        // Remove quotes if present
+        if ((value.startsWith('"') && value.endsWith('"')) ||
+            (value.startsWith("'") && value.endsWith("'"))) {
+          value = value.slice(1, -1);
+        }
+
+        envVars[key] = value;
+      }
+    }
+
+    return envVars;
+  }
+
+  /**
+   * Load environment variables from auto-claude .env file (bundled with app)
    */
   loadAutoBuildEnv(): Record<string, string> {
     const autoBuildSource = this.getAutoBuildSourcePath();
@@ -112,32 +144,31 @@ export class AgentProcessManager {
 
     try {
       const envContent = readFileSync(envPath, 'utf-8');
-      const envVars: Record<string, string> = {};
+      return this.parseEnvFile(envContent);
+    } catch {
+      return {};
+    }
+  }
 
-      // Handle both Unix (\n) and Windows (\r\n) line endings
-      for (const line of envContent.split(/\r?\n/)) {
-        const trimmed = line.trim();
-        // Skip comments and empty lines
-        if (!trimmed || trimmed.startsWith('#')) {
-          continue;
-        }
+  /**
+   * Load environment variables from project's .auto-claude/.env file
+   * This contains project-specific configuration like Graphiti settings
+   */
+  loadProjectAutoBuildEnv(projectPath: string): Record<string, string> {
+    // Find project to get autoBuildPath setting
+    const projects = projectStore.getProjects();
+    const project = projects.find((p) => p.path === projectPath);
 
-        const eqIndex = trimmed.indexOf('=');
-        if (eqIndex > 0) {
-          const key = trimmed.substring(0, eqIndex).trim();
-          let value = trimmed.substring(eqIndex + 1).trim();
+    const autoBuildPath = project?.autoBuildPath || '.auto-claude';
+    const envPath = path.join(projectPath, autoBuildPath, '.env');
 
-          // Remove quotes if present
-          if ((value.startsWith('"') && value.endsWith('"')) ||
-              (value.startsWith("'") && value.endsWith("'"))) {
-            value = value.slice(1, -1);
-          }
+    if (!existsSync(envPath)) {
+      return {};
+    }
 
-          envVars[key] = value;
-        }
-      }
-
-      return envVars;
+    try {
+      const envContent = readFileSync(envPath, 'utf-8');
+      return this.parseEnvFile(envContent);
     } catch {
       return {};
     }
@@ -433,10 +464,21 @@ export class AgentProcessManager {
 
   /**
    * Get combined environment variables for a project
+   *
+   * Priority order (later overrides earlier):
+   * 1. Bundled auto-claude .env (app defaults)
+   * 2. Project .auto-claude/.env (project-specific config like Graphiti)
+   * 3. Project settings (UI-managed settings)
    */
   getCombinedEnv(projectPath: string): Record<string, string> {
     const autoBuildEnv = this.loadAutoBuildEnv();
+    const projectAutoBuildEnv = this.loadProjectAutoBuildEnv(projectPath);
     const projectEnv = this.getProjectEnvVars(projectPath);
-    return { ...autoBuildEnv, ...projectEnv };
+
+    return {
+      ...autoBuildEnv,           // 1. App defaults
+      ...projectAutoBuildEnv,    // 2. Project .auto-claude/.env (GRAPHITI_ENABLED, etc.)
+      ...projectEnv              // 3. UI settings (highest priority)
+    };
   }
 }
