@@ -139,14 +139,41 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       })
     })),
 
-  appendLog: (taskId, log) =>
-    set((state) => ({
-      tasks: state.tasks.map((t) =>
-        t.id === taskId
-          ? { ...t, logs: [...(t.logs || []), log] }
-          : t
-      )
-    })),
+  appendLog: (() => {
+    // Module-level cache for deduplication
+    const dedupCache = new Map<string, number>();
+
+    return (taskId: string, log: string) => {
+      // Deduplication: prevent duplicate logs from race conditions
+      const now = Date.now();
+      const dedupKey = `${taskId}:${log.substring(0, 100)}`;
+
+      const lastAppendTime = dedupCache.get(dedupKey);
+      if (lastAppendTime && (now - lastAppendTime) < 100) {
+        // Same log within 100ms window = duplicate from multiple listeners
+        return; // Skip this append
+      }
+
+      // Record this append
+      dedupCache.set(dedupKey, now);
+
+      // Clean cache (keep last 50 entries to prevent memory leak)
+      if (dedupCache.size > 50) {
+        const entries = Array.from(dedupCache.entries()).sort(([, a], [, b]) => b - a);
+        dedupCache.clear();
+        entries.slice(0, 50).forEach(([k, v]) => dedupCache.set(k, v));
+      }
+
+      // Restore specId fallback (id and specId are always identical, provides resilience)
+      set((state) => ({
+        tasks: state.tasks.map((t) =>
+          t.id === taskId || t.specId === taskId
+            ? { ...t, logs: [...(t.logs || []), log] }
+            : t
+        )
+      }));
+    };
+  })(),
 
   selectTask: (taskId) => set({ selectedTaskId: taskId }),
 

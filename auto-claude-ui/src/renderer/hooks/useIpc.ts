@@ -8,42 +8,37 @@ import type { ImplementationPlan, TaskStatus, RoadmapGenerationStatus, Roadmap, 
  * Hook to set up IPC event listeners for task updates
  */
 export function useIpcListeners(): void {
-  const updateTaskFromPlan = useTaskStore((state) => state.updateTaskFromPlan);
-  const updateTaskStatus = useTaskStore((state) => state.updateTaskStatus);
-  const updateExecutionProgress = useTaskStore((state) => state.updateExecutionProgress);
-  const appendLog = useTaskStore((state) => state.appendLog);
-  const setError = useTaskStore((state) => state.setError);
-
   useEffect(() => {
-    // Set up listeners
+    // Set up listeners - use getState() to avoid dependency issues
     const cleanupProgress = window.electronAPI.onTaskProgress(
       (taskId: string, plan: ImplementationPlan) => {
-        updateTaskFromPlan(taskId, plan);
+        useTaskStore.getState().updateTaskFromPlan(taskId, plan);
       }
     );
 
     const cleanupError = window.electronAPI.onTaskError(
       (taskId: string, error: string) => {
-        setError(`Task ${taskId}: ${error}`);
-        appendLog(taskId, `[ERROR] ${error}`);
+        const store = useTaskStore.getState();
+        store.setError(`Task ${taskId}: ${error}`);
+        store.appendLog(taskId, `[ERROR] ${error}`);
       }
     );
 
     const cleanupLog = window.electronAPI.onTaskLog(
       (taskId: string, log: string) => {
-        appendLog(taskId, log);
+        useTaskStore.getState().appendLog(taskId, log);
       }
     );
 
     const cleanupStatus = window.electronAPI.onTaskStatusChange(
       (taskId: string, status: TaskStatus) => {
-        updateTaskStatus(taskId, status);
+        useTaskStore.getState().updateTaskStatus(taskId, status);
       }
     );
 
     const cleanupExecutionProgress = window.electronAPI.onTaskExecutionProgress(
       (taskId: string, progress: ExecutionProgress) => {
-        updateExecutionProgress(taskId, progress);
+        useTaskStore.getState().updateExecutionProgress(taskId, progress);
       }
     );
 
@@ -180,7 +175,7 @@ export function useIpcListeners(): void {
       cleanupRateLimit();
       cleanupSDKRateLimit();
     };
-  }, [updateTaskFromPlan, updateTaskStatus, updateExecutionProgress, appendLog, setError]);
+  }, []); // Empty array - listeners registered once on mount, cleaned up on unmount
 }
 
 /**
