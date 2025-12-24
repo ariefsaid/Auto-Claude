@@ -34,17 +34,24 @@ class IdeationFormatter:
         """
         ideation_file = self.output_dir / "ideation.json"
 
-        # Load existing ideas if in append mode
-        existing_ideas = []
+        # ALWAYS load existing ideas to preserve status (even when not in append mode)
+        existing_ideas_by_id = {}
         existing_session = None
-        if append and ideation_file.exists():
+        if ideation_file.exists():
             try:
                 with open(ideation_file) as f:
                     existing_session = json.load(f)
                     existing_ideas = existing_session.get("ideas", [])
-                    print_status(
-                        f"Preserving {len(existing_ideas)} existing ideas", "info"
-                    )
+                    # Create lookup by ID for efficient status preservation
+                    for idea in existing_ideas:
+                        idea_id = idea.get("id")
+                        if idea_id:
+                            existing_ideas_by_id[idea_id] = idea
+                    if existing_ideas_by_id:
+                        print_status(
+                            f"Found {len(existing_ideas_by_id)} existing ideas to preserve status from",
+                            "info",
+                        )
             except json.JSONDecodeError:
                 pass
 
@@ -59,17 +66,46 @@ class IdeationFormatter:
                     with open(type_file) as f:
                         data = json.load(f)
                         ideas = data.get(ideation_type, [])
+
+                        # Merge with existing ideas to preserve status and metadata
+                        for idea in ideas:
+                            idea_id = idea.get("id")
+                            if idea_id and idea_id in existing_ideas_by_id:
+                                existing = existing_ideas_by_id[idea_id]
+                                # Preserve user-managed metadata from existing idea
+                                idea["status"] = existing.get("status", "draft")
+                                # Preserve task conversion metadata
+                                if "taskId" in existing:
+                                    idea["taskId"] = existing["taskId"]
+                                if "task_id" in existing:
+                                    idea["task_id"] = existing["task_id"]
+                                # Preserve timestamp metadata
+                                if "dismissedAt" in existing:
+                                    idea["dismissedAt"] = existing["dismissedAt"]
+                                if "dismissed_at" in existing:
+                                    idea["dismissed_at"] = existing["dismissed_at"]
+                                if "archivedAt" in existing:
+                                    idea["archivedAt"] = existing["archivedAt"]
+                                if "archived_at" in existing:
+                                    idea["archived_at"] = existing["archived_at"]
+                                if "convertedAt" in existing:
+                                    idea["convertedAt"] = existing["convertedAt"]
+                                if "converted_at" in existing:
+                                    idea["converted_at"] = existing["converted_at"]
+
                         new_ideas.extend(ideas)
                         output_files.append(str(type_file))
                 except (json.JSONDecodeError, KeyError):
                     pass
 
-        # In append mode, filter out ideas from types we're regenerating
+        # In append mode, also preserve ideas from types NOT being regenerated
         # (to avoid duplicates) and keep ideas from other types
-        if append and existing_ideas:
+        if append and existing_ideas_by_id:
             # Keep existing ideas that are NOT from the types we just generated
             preserved_ideas = [
-                idea for idea in existing_ideas if idea.get("type") not in enabled_types
+                idea
+                for idea in existing_ideas_by_id.values()
+                if idea.get("type") not in enabled_types
             ]
             all_ideas = preserved_ideas + new_ideas
             print_status(
