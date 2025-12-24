@@ -167,6 +167,7 @@ Output critique_report.json with:
                 "spec_critic.md",
                 additional_context=context_str,
                 phase_name="self_critique",
+                read_claude_md=True,
             )
 
             if success:
