@@ -690,6 +690,7 @@ export function App() {
 
         {/* Task detail modal */}
         <TaskDetailModal
+          key={selectedTask?.id}
           open={!!selectedTask}
           task={selectedTask}
           onOpenChange={(open) => !open && handleCloseTaskDetail()}
