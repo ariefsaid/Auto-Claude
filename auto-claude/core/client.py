@@ -129,12 +129,35 @@ BUILTIN_TOOLS = [
 ]
 
 
+def _load_claude_md(project_dir: Path) -> str | None:
+    """
+    Load CLAUDE.md from project directory if it exists.
+
+    Args:
+        project_dir: Project directory to search for CLAUDE.md
+
+    Returns:
+        CLAUDE.md content as string, or None if file doesn't exist
+    """
+    claude_md_path = project_dir / "CLAUDE.md"
+    if claude_md_path.exists():
+        try:
+            content = claude_md_path.read_text(encoding="utf-8")
+            return content.strip()
+        except Exception as e:
+            # Log warning but don't fail - CLAUDE.md is optional
+            print(f"Warning: Could not read CLAUDE.md: {e}")
+            return None
+    return None
+
+
 def create_client(
     project_dir: Path,
     spec_dir: Path,
     model: str,
     agent_type: str = "coder",
     max_thinking_tokens: int | None = None,
+    read_claude_md: bool = False,
 ) -> ClaudeSDKClient:
     """
     Create a Claude Agent SDK client with multi-layered security.
@@ -150,6 +173,9 @@ def create_client(
                             - high: 10000 (QA review)
                             - medium: 5000 (planning, validation)
                             - None: disabled (coding)
+        read_claude_md: Whether to read and append CLAUDE.md from project_dir.
+                       Only used for spec creation agents (spec_researcher, spec_critic).
+                       Autonomous build agents (planner, coder, qa) ignore this.
 
     Returns:
         Configured ClaudeSDKClient
@@ -335,19 +361,38 @@ def create_client(
         if auto_claude_mcp_server:
             mcp_servers["auto-claude"] = auto_claude_mcp_server
 
+    # Base system prompt
+    base_system_prompt = (
+        f"You are an expert full-stack developer building production-quality software. "
+        f"Your working directory is: {project_dir.resolve()}\n"
+        f"Your filesystem access is RESTRICTED to this directory only. "
+        f"Use relative paths (starting with ./) for all file operations. "
+        f"Never use absolute paths or try to access files outside your working directory.\n\n"
+        f"You follow existing code patterns, write clean maintainable code, and verify "
+        f"your work through thorough testing. You communicate progress through Git commits "
+        f"and build-progress.txt updates."
+    )
+
+    # Optionally append CLAUDE.md project instructions
+    system_prompt = base_system_prompt
+    if read_claude_md:
+        claude_md_content = _load_claude_md(project_dir)
+        if claude_md_content:
+            system_prompt += (
+                f"\n\n{'='*60}\n"
+                f"## PROJECT-SPECIFIC INSTRUCTIONS (from CLAUDE.md)\n"
+                f"{'='*60}\n\n"
+                f"{claude_md_content}\n"
+                f"{'='*60}\n"
+            )
+            print(
+                f"   - Loaded project instructions from CLAUDE.md ({len(claude_md_content)} chars)"
+            )
+
     return ClaudeSDKClient(
         options=ClaudeAgentOptions(
             model=model,
-            system_prompt=(
-                f"You are an expert full-stack developer building production-quality software. "
-                f"Your working directory is: {project_dir.resolve()}\n"
-                f"Your filesystem access is RESTRICTED to this directory only. "
-                f"Use relative paths (starting with ./) for all file operations. "
-                f"Never use absolute paths or try to access files outside your working directory.\n\n"
-                f"You follow existing code patterns, write clean maintainable code, and verify "
-                f"your work through thorough testing. You communicate progress through Git commits "
-                f"and build-progress.txt updates."
-            ),
+            system_prompt=system_prompt,
             allowed_tools=allowed_tools_list,
             mcp_servers=mcp_servers,
             hooks={

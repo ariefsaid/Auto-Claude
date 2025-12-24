@@ -220,3 +220,30 @@ python auto-claude/run.py --spec 001
 - `auto-claude/` - Python backend/CLI (the framework code)
 - `auto-claude-ui/` - Optional Electron frontend
 - `.auto-claude/specs/` - Per-project data (specs, plans, QA reports) - gitignored
+
+## CLAUDE.md Support for Target Projects
+
+When creating specs for external projects, Auto-Claude can read CLAUDE.md files from the target project directory. This provides project-specific context during spec creation.
+
+**How it works:**
+- Automatically enabled during spec creation (no configuration needed)
+- Only used by: `spec_researcher` and `spec_critic` agents
+- NOT used by autonomous build agents (planner, coder, qa)
+- CLAUDE.md content is appended to the agent's system prompt
+
+**Example CLAUDE.md in your target project:**
+```md
+# Project Instructions
+
+## Code Style
+- Use TypeScript strict mode
+- Prefer functional components in React
+- All functions must have JSDoc comments
+
+## Architecture
+- Follow the existing layered architecture
+- Database access only through repositories
+- UI components in src/components/
+```
+
+This helps ensure specs align with your project's conventions and guidelines.

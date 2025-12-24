@@ -51,6 +51,7 @@ class AgentRunner:
         interactive: bool = False,
         thinking_budget: int | None = None,
         prior_phase_summaries: str | None = None,
+        read_claude_md: bool = False,
     ) -> tuple[bool, str]:
         """Run an agent with the given prompt.
 
@@ -60,6 +61,7 @@ class AgentRunner:
             interactive: Whether to run in interactive mode
             thinking_budget: Token budget for extended thinking (None = disabled)
             prior_phase_summaries: Summaries from previous phases for context
+            read_claude_md: Whether to read and append CLAUDE.md from project directory
 
         Returns:
             Tuple of (success, response_text)
@@ -120,6 +122,7 @@ class AgentRunner:
             self.spec_dir,
             self.model,
             max_thinking_tokens=thinking_budget,
+            read_claude_md=read_claude_md,
         )
 
         current_tool = None

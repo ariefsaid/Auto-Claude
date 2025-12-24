@@ -222,6 +222,7 @@ Output your findings to research.json.
                 "spec_researcher.md",
                 additional_context=context_str,
                 phase_name="research",
+                read_claude_md=True,
             )
 
             if success and research_file.exists():
