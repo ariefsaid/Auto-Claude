@@ -55,7 +55,9 @@ describe('Task Store', () => {
       tasks: [],
       selectedTaskId: null,
       isLoading: false,
-      error: null
+      error: null,
+      maxParallelTasks: 2,
+      taskQueue: []
     });
   });
 
@@ -160,12 +162,12 @@ describe('Task Store', () => {
   });
 
   describe('updateTaskStatus', () => {
-    it('should update task status by id', () => {
+    it('should update task status by id', async () => {
       useTaskStore.setState({
         tasks: [createTestTask({ id: 'task-1', status: 'backlog' })]
       });
 
-      useTaskStore.getState().updateTaskStatus('task-1', 'in_progress');
+      await useTaskStore.getState().updateTaskStatus('task-1', 'in_progress');
 
       expect(useTaskStore.getState().tasks[0].status).toBe('in_progress');
     });
@@ -180,13 +182,13 @@ describe('Task Store', () => {
       expect(useTaskStore.getState().tasks[0].status).toBe('done');
     });
 
-    it('should update updatedAt timestamp', () => {
+    it('should update updatedAt timestamp', async () => {
       const originalDate = new Date('2024-01-01');
       useTaskStore.setState({
         tasks: [createTestTask({ id: 'task-1', updatedAt: originalDate })]
       });
 
-      useTaskStore.getState().updateTaskStatus('task-1', 'in_progress');
+      await useTaskStore.getState().updateTaskStatus('task-1', 'in_progress');
 
       expect(useTaskStore.getState().tasks[0].updatedAt.getTime()).toBeGreaterThan(
         originalDate.getTime()
