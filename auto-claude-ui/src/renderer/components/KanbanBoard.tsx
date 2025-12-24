@@ -17,7 +17,7 @@ import {
   sortableKeyboardCoordinates,
   verticalListSortingStrategy
 } from '@dnd-kit/sortable';
-import { Plus, Inbox, Loader2, Eye, CheckCircle2, Archive, RefreshCw } from 'lucide-react';
+import { Plus, Inbox, Loader2, Eye, CheckCircle2, Archive, RefreshCw, Zap } from 'lucide-react';
 import { ScrollArea } from './ui/scroll-area';
 import { Button } from './ui/button';
 import { Checkbox } from './ui/checkbox';
@@ -216,6 +216,11 @@ export function KanbanBoard({ tasks, onTaskClick, onNewTaskClick, projectId }: K
   const [overColumnId, setOverColumnId] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
 
+  // Get parallel execution state from store
+  const maxParallelTasks = useTaskStore((state) => state.maxParallelTasks);
+  const setMaxParallelTasks = useTaskStore((state) => state.setMaxParallelTasks);
+  const taskQueue = useTaskStore((state) => state.taskQueue);
+
   // Get loading state for refresh button
   const isLoading = useTaskStore((state) => state.isLoading);
 
@@ -354,7 +359,41 @@ export function KanbanBoard({ tasks, onTaskClick, onNewTaskClick, projectId }: K
     <div className="flex h-full flex-col">
       {/* Kanban header with filters */}
       <div className="flex items-center justify-end px-6 py-3 border-b border-border/50">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-4">
+          {/* Parallel task slider */}
+          <div className="flex items-center gap-3 px-4 py-2 rounded-lg border border-border/50 bg-card/30">
+            <div className="flex items-center gap-2">
+              <Zap className="h-4 w-4 text-muted-foreground" />
+              <Label htmlFor="parallelSlider" className="text-sm font-medium whitespace-nowrap">
+                Parallel Tasks
+              </Label>
+            </div>
+            <div className="flex items-center gap-3 min-w-[140px]">
+              <input
+                id="parallelSlider"
+                type="range"
+                min="1"
+                max="3"
+                value={maxParallelTasks}
+                onChange={(e) => setMaxParallelTasks(Number(e.target.value))}
+                className="flex-1 h-2 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary"
+              />
+              <span className="text-sm font-semibold min-w-[3ch] text-center">
+                {maxParallelTasks}
+              </span>
+            </div>
+          </div>
+
+          {/* Queue badge (if tasks are queued) */}
+          {taskQueue.length > 0 && (
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-blue-500/10 border border-blue-500/30">
+              <Loader2 className="h-3.5 w-3.5 text-blue-400 animate-spin" />
+              <span className="text-xs font-medium text-blue-400">
+                {taskQueue.length} queued
+              </span>
+            </div>
+          )}
+
           {/* Refresh button */}
           <Tooltip>
             <TooltipTrigger asChild>

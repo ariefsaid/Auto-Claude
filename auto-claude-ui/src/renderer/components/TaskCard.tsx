@@ -198,6 +198,16 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
                 Stuck
               </Badge>
             )}
+            {/* Queue indicator - task is waiting for execution slot */}
+            {task.queuePosition && (
+              <Badge
+                variant="outline"
+                className="text-[10px] px-1.5 py-0.5 flex items-center gap-1 bg-blue-500/10 text-blue-400 border-blue-500/30"
+              >
+                <Clock className="h-2.5 w-2.5" />
+                Queued #{task.queuePosition}
+              </Badge>
+            )}
             {/* Incomplete indicator - task in human_review but no subtasks completed */}
             {isIncomplete && !isStuck && (
               <Badge

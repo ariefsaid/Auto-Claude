@@ -244,6 +244,12 @@ export interface Task {
   releasedInVersion?: string;  // Version in which this task was released
   stagedInMainProject?: boolean;  // True if changes were staged to main project (worktree merged with --no-commit)
   stagedAt?: string;  // ISO timestamp when changes were staged
+
+  // Queue metadata for parallel task control
+  queuedAt?: Date;  // When task was queued (waiting for execution slot)
+  queuePosition?: number;  // Position in queue (1-based, for display)
+  queueReason?: 'slot_limit' | 'manual_hold';  // Why task is queued
+
   createdAt: Date;
   updatedAt: Date;
 }

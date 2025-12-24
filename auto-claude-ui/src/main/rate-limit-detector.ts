@@ -98,6 +98,13 @@ export function detectRateLimit(
   output: string,
   profileId?: string
 ): RateLimitDetectionResult {
+  // First check if this is context exhaustion (not a rate limit)
+  const contextCheck = detectContextExhaustion(output);
+  if (contextCheck.isExhausted) {
+    // Not a rate limit, return false
+    return { isRateLimited: false };
+  }
+
   // Check for the primary rate limit pattern
   const match = output.match(RATE_LIMIT_PATTERN);
 
@@ -379,4 +386,52 @@ export function createSDKRateLimitInfo(
     detectedAt: new Date(),
     originalError: detection.originalError
   };
+}
+
+/**
+ * Patterns for context exhaustion detection
+ * NOTE: Reactive detection only - API doesn't expose token usage
+ */
+const CONTEXT_EXHAUSTION_PATTERNS = [
+  /context.*(?:window|length|limit)/i,
+  /token.*limit.*(?:reached|exceeded)/i,
+  /maximum.*(?:context|tokens)/i,
+  /conversation.*too.*long/i,
+  /exceeded.*context/i
+];
+
+/**
+ * Result of context exhaustion detection
+ */
+export interface ContextExhaustionResult {
+  isExhausted: boolean;
+  type?: 'context_length' | 'token_limit';
+  message?: string;
+}
+
+/**
+ * Detect context window exhaustion (separate from rate limits)
+ * This is REACTIVE detection from error messages - we cannot proactively
+ * track usage since the API doesn't expose token counts
+ */
+export function detectContextExhaustion(output: string): ContextExhaustionResult {
+  for (const pattern of CONTEXT_EXHAUSTION_PATTERNS) {
+    if (pattern.test(output)) {
+      const type = /token/i.test(output) ? 'token_limit' : 'context_length';
+      const message = type === 'token_limit'
+        ? 'Token limit reached - committing progress and continuing in new session'
+        : 'Context window exhausted - saving progress and resuming';
+
+      return { isExhausted: true, type, message };
+    }
+  }
+
+  return { isExhausted: false };
+}
+
+/**
+ * Check if output contains context exhaustion error
+ */
+export function isContextExhausted(output: string): boolean {
+  return detectContextExhaustion(output).isExhausted;
 }
