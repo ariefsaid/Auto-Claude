@@ -1,7 +1,7 @@
 import { app, BrowserWindow, shell, nativeImage } from 'electron';
 import { join } from 'path';
 import { electronApp, optimizer, is } from '@electron-toolkit/utils';
-import fixPath from 'fix-path';
+import * as fixPathModule from 'fix-path';
 import { setupIpcHandlers } from './ipc-setup';
 import { AgentManager } from './agent';
 import { TerminalManager } from './terminal-manager';
@@ -12,7 +12,11 @@ import { initializeAppUpdater } from './app-updater';
 
 // Fix PATH on macOS - Electron doesn't inherit shell PATH by default
 // This ensures spawned processes can find binaries like python3, git, etc.
-fixPath();
+// Access default export from ESM module
+const fixPath = (fixPathModule as any).default || fixPathModule;
+if (typeof fixPath === 'function') {
+  fixPath();
+}
 
 // Get icon path based on platform
 function getIconPath(): string {
