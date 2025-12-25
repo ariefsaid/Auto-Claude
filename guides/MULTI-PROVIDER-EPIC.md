@@ -199,35 +199,45 @@ Auto-Claude uses a **two-tier configuration system** following the existing cred
 AGENT_PROVIDER=opencode  # Override: use OpenCode for this project
 AGENT_PROVIDER_IS_GLOBAL=false  # Tracks that this is a project-specific override
 
-# OpenCode Configuration (project-specific)
-OPENCODE_PROVIDER=zai
-OPENCODE_API_KEY=zai-xxxxx  # Project-specific key OR leave empty to use global
-OPENCODE_API_KEY_IS_GLOBAL=false  # false = project-specific, true = uses global
-OPENCODE_MODEL=glm-4.7
+# OpenCode Provider Selection
+OPENCODE_PROVIDER=zai  # Which provider OpenCode should route to
 
-# Claude Code (existing pattern - can coexist)
+# ✅ Generic Credential Store (JSON format)
+# Maps provider → credential config with inheritance tracking
+PROVIDER_CREDENTIALS='{"zai":{"isGlobal":true}}'  # Use global zai credential
+
+# OR Project-Specific Override:
+# PROVIDER_CREDENTIALS='{"zai":{"isGlobal":false,"apiKey":"project-zai-key","model":"glm-4.7"}}'
+
+# Claude Code (for backward compatibility when using claude_code provider)
 CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...  # OR leave empty to use global
 CLAUDE_TOKEN_IS_GLOBAL=true  # Inherits from global settings
 
 # Example Scenarios:
 # ------------------
 
-# Scenario 1: Use Global Z.ai Key
+# Scenario 1: Use Global Z.ai Key (Inherits Everything)
 AGENT_PROVIDER=opencode
 OPENCODE_PROVIDER=zai
-# OPENCODE_API_KEY not set → uses globalZaiApiKey from ~/.config/auto-claude-ui/settings.json
-OPENCODE_API_KEY_IS_GLOBAL=true
+PROVIDER_CREDENTIALS='{"zai":{"isGlobal":true}}'
+# → Uses zai credential from global providerCredentials store
 
-# Scenario 2: Client-Specific OpenRouter Account
+# Scenario 2: Client-Specific OpenRouter Account (Project Override)
 AGENT_PROVIDER=opencode
 OPENCODE_PROVIDER=openrouter
-OPENCODE_API_KEY=sk-or-client-specific-xxxxx  # Project-specific override
-OPENCODE_API_KEY_IS_GLOBAL=false
+PROVIDER_CREDENTIALS='{"openrouter":{"isGlobal":false,"apiKey":"sk-or-client-xxxxx"}}'
+# → Uses project-specific OpenRouter key, overrides global
 
-# Scenario 3: Inherit Everything from Global (minimal .env)
+# Scenario 3: Multiple Providers in One Project (Advanced)
+AGENT_PROVIDER=opencode
+OPENCODE_PROVIDER=zai
+PROVIDER_CREDENTIALS='{"zai":{"isGlobal":true},"openai":{"isGlobal":false,"apiKey":"sk-test-key"}}'
+# → Uses global zai, project-specific openai (for testing different providers)
+
+# Scenario 4: Inherit Everything from Global (minimal .env)
 # Leave .env empty or minimal → all credentials from global settings
 AGENT_PROVIDER_IS_GLOBAL=true
-CLAUDE_TOKEN_IS_GLOBAL=true
+# → Uses global default provider + global credentials
 ```
 
 **Global Configuration (User-Level Defaults):**
@@ -236,19 +246,86 @@ CLAUDE_TOKEN_IS_GLOBAL=true
 {
   "globalDefaultProvider": "opencode",  // Default for all new projects
 
-  // Global Credentials (set once, use everywhere)
-  "globalClaudeOAuthToken": "sk-ant-oat01-xxxxx",
-  "globalOpenAIApiKey": "sk-xxxxx",
-  "globalAnthropicApiKey": "sk-ant-xxxxx",
-  "globalGoogleApiKey": "AIza-xxxxx",
-  "globalGroqApiKey": "gsk-xxxxx",
-  "globalZaiApiKey": "zai-xxxxx",  // NEW
-  "globalOpenRouterApiKey": "sk-or-xxxxx",  // NEW
+  // ✅ Dynamic Credential Store (ANY provider supported via normalization)
+  "providerCredentials": {
+    // Standard providers (normalized IDs)
+    "claude": {
+      "provider": "claude",
+      "displayName": "Claude (Anthropic)",
+      "apiKey": "sk-ant-oat01-xxxxx",
+      "defaultModel": "claude-sonnet-4-5"
+    },
+    "openai": {
+      "provider": "openai",
+      "displayName": "OpenAI",
+      "apiKey": "sk-xxxxx",
+      "defaultModel": "gpt-5o"
+    },
+    // Multi-word providers (normalized: "Z.ai GLM" → "zai-glm")
+    "zai-glm": {
+      "provider": "zai-glm",
+      "displayName": "Z.ai GLM 4.7",
+      "apiKey": "zai-xxxxx",
+      "defaultModel": "glm-4.7",
+      "metadata": {
+        "subscription": "premium",
+        "advancedThinking": true,
+        "vibeCoding": true
+      }
+    },
+    // OpenRouter (normalized: "OpenRouter" → "openrouter")
+    "openrouter": {
+      "provider": "openrouter",
+      "displayName": "OpenRouter (400+ Models)",
+      "apiKey": "sk-or-xxxxx",
+      "defaultModel": "auto",
+      "metadata": {
+        "autoFallback": true,
+        "costOptimization": true
+      }
+    },
+    // AWS Bedrock (normalized: "AWS Bedrock" → "aws-bedrock")
+    "aws-bedrock": {
+      "provider": "aws-bedrock",
+      "displayName": "AWS Bedrock",
+      "apiKey": "aws-access-key",
+      "defaultModel": "anthropic.claude-v3-5",
+      "metadata": {
+        "region": "us-east-1",
+        "awsSecretKey": "encrypted-secret"
+      }
+    },
+    // Custom self-hosted LLM (normalized: "Company LLM" → "company-llm")
+    "company-llm": {
+      "provider": "company-llm",
+      "displayName": "Company Internal LLM",
+      "apiKey": "internal-key",
+      "baseUrl": "https://llm.company.com/v1",
+      "defaultModel": "company-model-v2",
+      "metadata": {
+        "protocol": "openai-compatible",
+        "vpnRequired": true
+      }
+    }
+  },
 
   // OpenCode Default Configuration
-  "globalOpencodeProvider": "zai",  // Default OpenCode provider
-  "globalOpencodeModel": "glm-4.7"  // Default model
+  "globalOpencodeProvider": "zai-glm",  // Default provider (normalized ID)
+  "globalOpencodeModel": "glm-4.7"  // Default model (optional override)
 }
+```
+
+**Provider Addition Flow (Fully Dynamic):**
+```
+User enters provider name: "Z.ai GLM"
+    ↓
+Normalize: normalize_provider_id("Z.ai GLM") → "zai-glm"
+    ↓
+Store in providerCredentials["zai-glm"]
+    ↓
+Available in OpenCode provider dropdown as "Z.ai GLM 4.7"
+    ↓
+No code changes needed!
 ```
 
 **Custom Provider Configuration (Advanced):**
@@ -286,6 +363,35 @@ Backend reads AGENT_PROVIDER from .env
 ProviderFactory creates appropriate client
 ```
 
+**Provider Normalization (Dynamic, No Hardcoded Lists):**
+```python
+# auto-claude/core/providers/utils.py (NEW)
+def normalize_provider_id(name: str) -> str:
+    """Normalize provider name to a consistent key format.
+
+    Rules:
+    - Lowercase
+    - Spaces → hyphens
+    - Remove special chars except hyphens
+    - Trim whitespace
+
+    Examples:
+    - "OpenAI" → "openai"
+    - "Z.ai GLM" → "zai-glm"
+    - "My Custom LLM" → "my-custom-llm"
+    - "AWS Bedrock" → "aws-bedrock"
+    """
+    import re
+    # Lowercase and replace spaces with hyphens
+    normalized = name.lower().strip().replace(' ', '-')
+    # Remove special chars except hyphens and alphanumeric
+    normalized = re.sub(r'[^a-z0-9-]', '', normalized)
+    # Remove consecutive hyphens
+    normalized = re.sub(r'-+', '-', normalized)
+    # Trim leading/trailing hyphens
+    return normalized.strip('-')
+```
+
 **Configuration Pattern (with Global/Project Inheritance):**
 ```python
 # auto-claude/core/providers/config.py (NEW)
@@ -293,10 +399,35 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 import os
+from .utils import normalize_provider_id
 
 class AgentProvider(str, Enum):
     CLAUDE_CODE = "claude_code"
     OPENCODE = "opencode"
+
+@dataclass
+class ProviderCredential:
+    """Generic credential for any provider with inheritance support.
+
+    Provider IDs are auto-normalized via normalize_provider_id():
+    - "OpenAI" → "openai"
+    - "Z.ai GLM" → "zai-glm"
+    - "My Custom LLM" → "my-custom-llm"
+
+    This allows ANY provider to be added without code changes.
+    """
+    provider: str  # Normalized provider ID (auto-generated from display name)
+    display_name: str = ""  # Human-readable name (e.g., "Z.ai GLM 4.7")
+    api_key: str = ""
+    is_global: bool = True  # True = inherit from global, False = project-specific
+    base_url: Optional[str] = None  # For custom endpoints (OpenAI-compatible APIs)
+    default_model: Optional[str] = None
+    metadata: dict = None  # Extensible for provider-specific config
+
+    def __post_init__(self):
+        # Auto-generate display name from provider if not set
+        if not self.display_name:
+            self.display_name = self.provider.replace('-', ' ').title()
 
 @dataclass
 class ProviderConfig:
@@ -305,21 +436,22 @@ class ProviderConfig:
     Follows the existing Auto-Claude pattern where:
     - Global settings provide defaults (set once, use everywhere)
     - Project settings override when needed
-    - Inheritance is tracked with *_is_global flags
+    - Inheritance is tracked with is_global flags
     """
 
     provider: AgentProvider = AgentProvider.CLAUDE_CODE
     provider_is_global: bool = True  # Tracks if provider is from global settings
 
-    # Claude Code settings
-    claude_oauth_token: str = ""
-    claude_token_is_global: bool = True  # Inherits from global by default
+    # ✅ Generic credential store (replaces individual API key fields)
+    credentials: dict[str, ProviderCredential] = None  # Maps provider ID → credential
 
-    # OpenCode settings
-    opencode_api_key: str = ""
-    opencode_api_key_is_global: bool = True  # Inherits from global by default
+    # OpenCode-specific settings (which provider to route to)
     opencode_provider: str = "openai"
     opencode_model: str = "gpt-5o-mini"
+
+    def __post_init__(self):
+        if self.credentials is None:
+            self.credentials = {}
 
     @classmethod
     def from_env(cls, global_settings: Optional[dict] = None) -> "ProviderConfig":
@@ -345,51 +477,104 @@ class ProviderConfig:
             provider = AgentProvider(global_settings.get("globalDefaultProvider", "claude_code"))
             provider_is_global = True
 
-        # Claude OAuth token with fallback
-        claude_token = os.getenv("CLAUDE_CODE_OAUTH_TOKEN")
-        claude_is_global = os.getenv("CLAUDE_TOKEN_IS_GLOBAL", "true").lower() == "true"
-        if not claude_token and claude_is_global:
-            # Use global token
-            claude_token = global_settings.get("globalClaudeOAuthToken", "")
+        # OpenCode provider selection
+        opencode_provider = os.getenv("OPENCODE_PROVIDER",
+                                     global_settings.get("globalOpencodeProvider", "openai"))
+        opencode_model = os.getenv("OPENCODE_MODEL",
+                                  global_settings.get("globalOpencodeModel", "gpt-5o-mini"))
 
-        # OpenCode API key with fallback
-        opencode_key = os.getenv("OPENCODE_API_KEY")
-        opencode_key_is_global = os.getenv("OPENCODE_API_KEY_IS_GLOBAL", "true").lower() == "true"
-        if not opencode_key and opencode_key_is_global:
-            # Try provider-specific global key
-            opencode_provider = os.getenv("OPENCODE_PROVIDER",
-                                         global_settings.get("globalOpencodeProvider", "openai"))
-
-            # Map provider to global key
-            key_map = {
-                "openai": "globalOpenAIApiKey",
-                "anthropic": "globalAnthropicApiKey",
-                "google": "globalGoogleApiKey",
-                "groq": "globalGroqApiKey",
-                "zai": "globalZaiApiKey",
-                "openrouter": "globalOpenRouterApiKey",
-            }
-            opencode_key = global_settings.get(key_map.get(opencode_provider, ""), "")
+        # ✅ Load credentials from generic store
+        credentials = cls._load_credentials(global_settings)
 
         return cls(
             provider=provider,
             provider_is_global=provider_is_global,
-            claude_oauth_token=claude_token,
-            claude_token_is_global=claude_is_global,
-            opencode_api_key=opencode_key,
-            opencode_api_key_is_global=opencode_key_is_global,
-            opencode_provider=os.getenv("OPENCODE_PROVIDER",
-                                       global_settings.get("globalOpencodeProvider", "openai")),
-            opencode_model=os.getenv("OPENCODE_MODEL",
-                                    global_settings.get("globalOpencodeModel", "gpt-5o-mini")),
+            credentials=credentials,
+            opencode_provider=opencode_provider,
+            opencode_model=opencode_model
         )
+
+    @classmethod
+    def _load_credentials(cls, global_settings: dict) -> dict[str, ProviderCredential]:
+        """Load credentials from PROVIDER_CREDENTIALS env var with global fallback.
+
+        Returns:
+            dict mapping provider ID → ProviderCredential
+        """
+        import json
+
+        credentials = {}
+
+        # 1. Load project-level credentials (from .env)
+        project_creds_json = os.getenv("PROVIDER_CREDENTIALS", "{}")
+        try:
+            project_creds = json.loads(project_creds_json)
+            for provider_id, cred_data in project_creds.items():
+                is_global = cred_data.get("isGlobal", True)
+
+                if is_global:
+                    # Inherit from global settings
+                    global_cred = global_settings.get("providerCredentials", {}).get(provider_id)
+                    if global_cred:
+                        credentials[provider_id] = ProviderCredential(
+                            provider=global_cred.get("provider", provider_id),
+                            api_key=global_cred.get("apiKey", ""),
+                            is_global=True,
+                            base_url=global_cred.get("baseUrl"),
+                            default_model=global_cred.get("defaultModel"),
+                            metadata=global_cred.get("metadata", {})
+                        )
+                else:
+                    # Project-specific credential
+                    credentials[provider_id] = ProviderCredential(
+                        provider=provider_id,
+                        api_key=cred_data.get("apiKey", ""),
+                        is_global=False,
+                        base_url=cred_data.get("baseUrl"),
+                        default_model=cred_data.get("model"),  # Note: "model" in project, "defaultModel" in global
+                        metadata=cred_data.get("metadata", {})
+                    )
+        except json.JSONDecodeError:
+            pass  # Invalid JSON, fall back to empty credentials
+
+        # 2. Load legacy Claude token if present (backward compatibility)
+        claude_token = os.getenv("CLAUDE_CODE_OAUTH_TOKEN")
+        claude_is_global = os.getenv("CLAUDE_TOKEN_IS_GLOBAL", "true").lower() == "true"
+        if claude_token or claude_is_global:
+            if claude_is_global and not claude_token:
+                # Use global providerCredentials for claude
+                global_claude = global_settings.get("providerCredentials", {}).get("claude", {})
+                claude_token = global_claude.get("apiKey", "")
+
+            if claude_token:
+                credentials["claude"] = ProviderCredential(
+                    provider="claude",
+                    api_key=claude_token,
+                    is_global=claude_is_global
+                )
+
+        return credentials
+
+    def get_credential(self, provider_id: str) -> Optional[ProviderCredential]:
+        """Get credential for a specific provider.
+
+        Args:
+            provider_id: Provider ID (e.g., 'openai', 'zai', 'claude')
+
+        Returns:
+            ProviderCredential or None if not found
+        """
+        return self.credentials.get(provider_id)
 
     def is_valid(self) -> bool:
         """Validate configuration has required credentials."""
         if self.provider == AgentProvider.CLAUDE_CODE:
-            return bool(self.claude_oauth_token)
+            claude_cred = self.get_credential("claude")
+            return bool(claude_cred and claude_cred.api_key)
         elif self.provider == AgentProvider.OPENCODE:
-            return bool(self.opencode_api_key and self.opencode_provider)
+            # Check if credential exists for selected OpenCode provider
+            provider_cred = self.get_credential(self.opencode_provider)
+            return bool(provider_cred and provider_cred.api_key and self.opencode_provider)
         return False
 
     def get_validation_errors(self) -> list[str]:
@@ -397,31 +582,41 @@ class ProviderConfig:
         errors = []
 
         if self.provider == AgentProvider.CLAUDE_CODE:
-            if not self.claude_oauth_token:
-                errors.append("Claude Code requires CLAUDE_CODE_OAUTH_TOKEN")
+            claude_cred = self.get_credential("claude")
+            if not claude_cred or not claude_cred.api_key:
+                errors.append("Claude Code requires 'claude' credential in providerCredentials")
         elif self.provider == AgentProvider.OPENCODE:
-            if not self.opencode_api_key:
-                errors.append(f"OpenCode with {self.opencode_provider} requires OPENCODE_API_KEY")
             if not self.opencode_provider:
                 errors.append("OpenCode requires OPENCODE_PROVIDER to be set")
+            else:
+                provider_cred = self.get_credential(self.opencode_provider)
+                if not provider_cred or not provider_cred.api_key:
+                    errors.append(
+                        f"OpenCode with {self.opencode_provider} requires credential "
+                        f"in providerCredentials (global or project-level)"
+                    )
 
         return errors
 
     def get_credential_source_info(self) -> dict:
         """Return info about where credentials came from (for UI display)."""
+        cred_info = {}
+
+        for provider_id, cred in self.credentials.items():
+            cred_info[provider_id] = {
+                "provider": cred.provider,
+                "configured": bool(cred.api_key),
+                "source": "global" if cred.is_global else "project",
+                "hasCustomEndpoint": bool(cred.base_url),
+                "defaultModel": cred.default_model
+            }
+
         return {
             "provider": {
                 "value": self.provider.value,
                 "source": "global" if self.provider_is_global else "project"
             },
-            "claude_token": {
-                "configured": bool(self.claude_oauth_token),
-                "source": "global" if self.claude_token_is_global else "project"
-            },
-            "opencode_key": {
-                "configured": bool(self.opencode_api_key),
-                "source": "global" if self.opencode_api_key_is_global else "project"
-            }
+            "credentials": cred_info
         }
 ```
 
@@ -537,82 +732,131 @@ class UniversalMessage:
 ## Implementation Stories (8 Stories for MVP)
 
 ### Story 1: Provider Configuration Foundation
-**Complexity**: Small | **Dependencies**: None | **Files**: 3 new
+**Complexity**: Medium | **Dependencies**: None | **Files**: 4 new
 
-**Description:** Create configuration system for provider selection and validation with global/project-level inheritance.
+**Description:** Create configuration system with **generic credential store** and **dynamic provider normalization** for provider selection and validation with global/project-level inheritance.
 
 **Tasks:**
 1. Create `auto-claude/core/providers/__init__.py`
-2. Create `auto-claude/core/providers/config.py` with:
+2. Create `auto-claude/core/providers/utils.py` with:
+   - `normalize_provider_id(name: str) -> str` - Normalize provider names
+     * Lowercase, spaces → hyphens
+     * Remove special chars except hyphens
+     * Examples: "Z.ai GLM" → "zai-glm", "AWS Bedrock" → "aws-bedrock"
+3. Create `auto-claude/core/providers/config.py` with:
    - `AgentProvider` enum (CLAUDE_CODE, OPENCODE)
-   - `ProviderConfig` dataclass with inheritance fields:
-     * `provider_is_global: bool` - tracks if provider is from global settings
-     * `claude_token_is_global: bool` - tracks Claude token source
-     * `opencode_api_key_is_global: bool` - tracks OpenCode key source
-   - `from_env(global_settings: Optional[dict])` - loads with global fallback
-   - `is_valid()` - validates configuration
-   - `get_validation_errors()` - returns error list
-   - `get_credential_source_info()` - returns source info for UI display
-3. Implement inheritance logic:
-   - Priority: Project .env → Global settings → Defaults
-   - Auto-map OpenCode providers to global keys (zai → globalZaiApiKey)
-   - Track inheritance with *_is_global flags
+   - `ProviderCredential` dataclass (generic credential with inheritance):
+     * `provider: str` - Provider ID (e.g., 'openai', 'zai', 'claude')
+     * `api_key: str` - API key for this provider
+     * `is_global: bool` - Tracks if inherited from global settings
+     * `base_url: Optional[str]` - Custom endpoint support
+     * `default_model: Optional[str]` - Provider-specific default model
+     * `metadata: dict` - Extensible provider-specific config
+   - `ProviderConfig` dataclass with generic credential store:
+     * `provider_is_global: bool` - Tracks if provider selection is from global
+     * `credentials: dict[str, ProviderCredential]` - Maps provider ID → credential
+     * `opencode_provider: str` - Which provider OpenCode should route to
+   - `from_env(global_settings: Optional[dict])` - Loads with global fallback
+   - `_load_credentials(global_settings)` - Loads credentials from PROVIDER_CREDENTIALS JSON
+   - `get_credential(provider_id)` - Helper to get specific credential
+   - `is_valid()` - Validates configuration
+   - `get_validation_errors()` - Returns error list
+   - `get_credential_source_info()` - Returns source info for UI display
+3. Implement generic credential inheritance logic:
+   - Priority: Project PROVIDER_CREDENTIALS → Global providerCredentials → Defaults
+   - Parse JSON credential store from environment variables
+   - Support legacy CLAUDE_CODE_OAUTH_TOKEN for backward compatibility
+   - Track inheritance per credential with `is_global` flag
 4. Add comprehensive unit tests:
-   - Test global fallback
-   - Test project override
-   - Test inheritance tracking
-   - Test multi-provider key mapping
+   - Test `normalize_provider_id()` with various inputs:
+     * Standard: "OpenAI" → "openai"
+     * Multi-word: "Z.ai GLM" → "zai-glm"
+     * Special chars: "AWS Bedrock 2.0" → "aws-bedrock-20"
+     * Edge cases: "  My-Custom  LLM!  " → "my-custom-llm"
+   - Test global credential fallback
+   - Test project credential override
+   - Test mixed inheritance (some global, some project)
+   - Test custom endpoints (self-hosted LLMs)
+   - Test legacy Claude token compatibility
+   - Test JSON parsing edge cases
 
 **Acceptance Criteria:**
-- ✅ `ProviderConfig.from_env(global_settings)` loads with global fallback
+- ✅ `normalize_provider_id()` produces consistent IDs (lowercase, hyphens, no special chars)
+- ✅ Python and TypeScript normalization produce IDENTICAL results
+- ✅ `ProviderConfig.from_env(global_settings)` loads credentials from generic store
 - ✅ Default provider is `claude_code` (backward compatibility)
-- ✅ Validates Claude Code OAuth token when `provider=claude_code`
-- ✅ Validates OpenCode API key when `provider=opencode`
-- ✅ Inheritance flags correctly track credential sources
-- ✅ Global settings properly fall back when project .env is empty
-- ✅ Project overrides work when *_IS_GLOBAL=false
-- ✅ OpenCode provider auto-maps to correct global key (zai → globalZaiApiKey)
+- ✅ Validates credentials using `get_credential(provider_id)` method
+- ✅ `PROVIDER_CREDENTIALS` JSON parsing works correctly
+- ✅ Inheritance flags correctly track credential sources per provider
+- ✅ Global providerCredentials properly fall back when project .env is empty
+- ✅ Project credential overrides work when `{"provider":{"isGlobal":false}}`
+- ✅ Legacy `CLAUDE_CODE_OAUTH_TOKEN` still works (backward compatibility)
+- ✅ Custom endpoints supported via `baseUrl` field
+- ✅ Display names stored and retrieved correctly
 - ✅ Comprehensive validation error messages
-- ✅ `get_credential_source_info()` returns UI-friendly source information
+- ✅ `get_credential_source_info()` returns UI-friendly source information for all providers
+- ✅ No schema changes needed to add new providers (fully dynamic & scalable)
 
 **Files Created:**
 - `auto-claude/core/providers/__init__.py`
+- `auto-claude/core/providers/utils.py` (normalization logic)
 - `auto-claude/core/providers/config.py`
 - `tests/test_provider_config.py`
+- `tests/test_provider_utils.py` (normalization tests)
 
 **Environment Variables Supported:**
 ```bash
 # Project-level (.auto-claude/.env)
 AGENT_PROVIDER=claude_code|opencode
 AGENT_PROVIDER_IS_GLOBAL=true|false
-CLAUDE_CODE_OAUTH_TOKEN=<token>
-CLAUDE_TOKEN_IS_GLOBAL=true|false
-OPENCODE_API_KEY=<key>
-OPENCODE_API_KEY_IS_GLOBAL=true|false
+
+# ✅ Generic Credential Store (JSON format)
+PROVIDER_CREDENTIALS='{"zai":{"isGlobal":true},"openai":{"isGlobal":false,"apiKey":"sk-..."}}'
+
+# OpenCode Provider Selection
 OPENCODE_PROVIDER=openai|anthropic|google|zai|openrouter|...
 OPENCODE_MODEL=<model-name>
+
+# Legacy (backward compatibility)
+CLAUDE_CODE_OAUTH_TOKEN=<token>
+CLAUDE_TOKEN_IS_GLOBAL=true|false
 ```
 
 **Global Settings Schema** (for reference):
 ```typescript
 {
   "globalDefaultProvider": "claude_code|opencode",
-  "globalClaudeOAuthToken": "<token>",
-  "globalOpenAIApiKey": "<key>",
-  "globalAnthropicApiKey": "<key>",
-  "globalGoogleApiKey": "<key>",
-  "globalGroqApiKey": "<key>",
-  "globalZaiApiKey": "<key>",
-  "globalOpenRouterApiKey": "<key>",
-  "globalOpencodeProvider": "openai|...",
+
+  // ✅ Generic Credential Store (replaces individual global*ApiKey fields)
+  "providerCredentials": {
+    "claude": {
+      "provider": "claude",
+      "apiKey": "<token>",
+      "defaultModel": "claude-sonnet-4-5"
+    },
+    "openai": {
+      "provider": "openai",
+      "apiKey": "<key>",
+      "defaultModel": "gpt-5o"
+    },
+    "zai": {
+      "provider": "zai",
+      "apiKey": "<key>",
+      "defaultModel": "glm-4.7"
+    },
+    // ... other providers
+  },
+
+  "globalOpencodeProvider": "openai|zai|...",
   "globalOpencodeModel": "<model>"
 }
 ```
 
 **Risk Mitigation:**
 - Follow proven Graphiti pattern exactly
-- Follow existing claudeTokenIsGlobal/openaiKeyIsGlobal pattern from UI types
-- Extensive unit tests for inheritance logic
+- Generic credential store avoids schema changes for new providers
+- Backward compatible with legacy CLAUDE_CODE_OAUTH_TOKEN
+- Extensive unit tests for inheritance logic and JSON parsing
 
 ---
 
@@ -830,53 +1074,44 @@ client = create_client(config, project_dir, spec_dir, model)  # Returns AgentCli
   {/* OpenCode Configuration */}
   {providerType === 'opencode' && (
     <>
-      <Select value={opencodeProvider} onValueChange={...}>
-        <SelectItem value="openai">OpenAI</SelectItem>
-        <SelectItem value="anthropic">Anthropic</SelectItem>
-        <SelectItem value="google">Google Gemini</SelectItem>
-        <SelectItem value="bedrock">AWS Bedrock</SelectItem>
-        <SelectItem value="groq">Groq</SelectItem>
-        <SelectItem value="azure">Azure OpenAI</SelectItem>
-        <SelectItem value="zai">Z.ai GLM (Advanced Thinking) 💰</SelectItem>
-        <SelectItem value="openrouter">OpenRouter (400+ Models) 🔀</SelectItem>
-      </Select>
-
-      {/* API Key Field with Global/Project Toggle */}
+      {/* ✅ DYNAMIC Provider Selection - loaded from providerCredentials */}
       <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <Label>API Key</Label>
-          <CredentialSourceBadge
-            isGlobal={opencodeApiKeyIsGlobal}
-            globalValue={getGlobalKeyForProvider(opencodeProvider)}
-          />
-        </div>
+        <Label>Provider</Label>
+        <Select value={opencodeProvider} onValueChange={handleProviderChange}>
+          {/* Show ALL configured providers from global settings */}
+          {getConfiguredProviders(globalSettings).map(cred => (
+            <SelectItem key={cred.provider} value={cred.provider}>
+              {cred.displayName || getProviderDisplayName(globalSettings, cred.provider)}
+              {cred.metadata?.advancedThinking && ' 🧠'}
+              {cred.metadata?.autoFallback && ' 🔀'}
+            </SelectItem>
+          ))}
+          {/* Add Provider button */}
+          <SelectItem value="__add_new__">+ Add Provider...</SelectItem>
+        </Select>
 
-        {/* Toggle: Use Global vs Project-Specific */}
-        <RadioGroup value={opencodeApiKeyIsGlobal ? 'global' : 'project'} onValueChange={...}>
-          <RadioGroupItem value="global">
-            Use Global {getProviderName(opencodeProvider)} Key {hasGlobalKey ? '✓' : '(not set)'}
-          </RadioGroupItem>
-          <RadioGroupItem value="project">
-            Set Project-Specific Key
-          </RadioGroupItem>
-        </RadioGroup>
-
-        {/* Show input only if project-specific selected */}
-        {!opencodeApiKeyIsGlobal && (
-          <PasswordInput
-            value={opencodeApiKey}
-            onChange={...}
-            placeholder={getPlaceholderForProvider(opencodeProvider)}
+        {/* Credential info for selected provider */}
+        {opencodeProvider && opencodeProvider !== '__add_new__' && (
+          <ProviderCredentialSection
+            providerId={opencodeProvider}
+            globalSettings={globalSettings}
+            projectCredentials={config.providerCredentials}
+            onUpdate={handleCredentialUpdate}
           />
         )}
       </div>
 
-      {/* Model Selection */}
-      <Select value={opencodeModel} onValueChange={...}>
-        {getModelsForProvider(opencodeProvider).map(model => (
-          <SelectItem value={model.value}>{model.label}</SelectItem>
-        ))}
-      </Select>
+      {/* Model Selection (optional override) */}
+      {opencodeProvider && (
+        <div className="space-y-2">
+          <Label>Model (optional override)</Label>
+          <Input
+            value={opencodeModel}
+            onChange={(e) => setOpencodeModel(e.target.value)}
+            placeholder={getGlobalCredential(globalSettings, opencodeProvider)?.defaultModel || 'auto'}
+          />
+        </div>
+      )}
     </>
   )}
 
@@ -894,26 +1129,97 @@ const CredentialSourceBadge = ({ isGlobal, globalValue }) => {
     return <Badge variant="default">Project Override</Badge>;
   }
 };
+
+{/* ✅ ProviderCredentialSection Component - handles global/project toggle */}
+const ProviderCredentialSection = ({
+  providerId,
+  globalSettings,
+  projectCredentials,
+  onUpdate
+}) => {
+  const globalCred = getGlobalCredential(globalSettings, providerId);
+  const projectCred = projectCredentials?.[providerId];
+  const isGlobal = projectCred?.isGlobal !== false;
+
+  return (
+    <div className="space-y-2 pl-4 border-l-2">
+      {/* Credential Source Badge */}
+      <div className="flex items-center justify-between">
+        <Label>Credentials</Label>
+        <CredentialSourceBadge
+          isGlobal={isGlobal}
+          globalValue={globalCred?.apiKey}
+        />
+      </div>
+
+      {/* Toggle: Use Global vs Project-Specific */}
+      <RadioGroup
+        value={isGlobal ? 'global' : 'project'}
+        onValueChange={(value) => {
+          onUpdate(providerId, { isGlobal: value === 'global' });
+        }}
+      >
+        <RadioGroupItem value="global">
+          Use Global {globalCred?.displayName || providerId} Credential
+          {globalCred?.apiKey ? ' ✓' : ' (not set in global settings)'}
+        </RadioGroupItem>
+        <RadioGroupItem value="project">
+          Set Project-Specific Credential
+        </RadioGroupItem>
+      </RadioGroup>
+
+      {/* Show credential input only if project-specific selected */}
+      {!isGlobal && (
+        <div className="space-y-2">
+          <PasswordInput
+            label="API Key"
+            value={projectCred?.apiKey || ''}
+            onChange={(value) => onUpdate(providerId, { apiKey: value, isGlobal: false })}
+            placeholder="Enter API key..."
+          />
+
+          {/* Optional: Custom Endpoint */}
+          <Input
+            label="Custom Endpoint (optional)"
+            value={projectCred?.baseUrl || ''}
+            onChange={(e) => onUpdate(providerId, { baseUrl: e.target.value, isGlobal: false })}
+            placeholder="https://api.custom-provider.com/v1"
+          />
+        </div>
+      )}
+    </div>
+  );
+};
 ```
 
 **Type Definitions:**
 ```typescript
 // auto-claude-ui/src/shared/types/project.ts
 export type AgentProviderType = 'claude_code' | 'opencode';
-export type OpenCodeProviderType = 'openai' | 'anthropic' | 'google' | 'bedrock' | 'groq' | 'azure' | 'zai' | 'openrouter';
+
+// ✅ NO HARDCODED PROVIDER ENUM - fully dynamic!
+// Provider IDs are auto-normalized from display names via normalizeProviderId()
+
+// ✅ Generic provider credential (matches Python ProviderCredential)
+export interface ProviderCredential {
+  provider: string;  // Normalized provider ID (e.g., "zai-glm", "aws-bedrock")
+  displayName: string;  // Human-readable name (e.g., "Z.ai GLM 4.7")
+  apiKey: string;
+  isGlobal: boolean;  // True = inherited from global, False = project override
+  baseUrl?: string;  // For custom endpoints (OpenAI-compatible APIs)
+  defaultModel?: string;
+  metadata?: Record<string, any>;
+}
 
 export interface AgentProviderConfig {
   providerType: AgentProviderType;
   providerIsGlobal?: boolean;  // Tracks if provider selection is inherited from global
 
-  // Claude Code settings (with inheritance tracking)
-  claudeOAuthToken?: string;
-  claudeTokenIsGlobal?: boolean;  // True = use global token, False = project override
+  // ✅ Generic credential store (maps provider ID → credential)
+  credentials?: Record<string, ProviderCredential>;
 
-  // OpenCode settings (with inheritance tracking)
-  opencodeProvider?: OpenCodeProviderType;
-  opencodeApiKey?: string;
-  opencodeApiKeyIsGlobal?: boolean;  // True = use global key, False = project override
+  // OpenCode-specific settings (which provider to route to)
+  opencodeProvider?: string;  // ✅ CHANGED: Any provider ID from credentials store
   opencodeModel?: string;
 
   // Status
@@ -923,33 +1229,42 @@ export interface AgentProviderConfig {
 
 // Add to ProjectEnvConfig interface (follows existing pattern)
 interface ProjectEnvConfig {
-  // ... existing fields (claudeOAuthToken, claudeTokenIsGlobal, etc.)
+  // ... existing fields
 
   // Agent Provider Configuration
   agentProvider?: AgentProviderType;  // 'claude_code' or 'opencode'
   agentProviderIsGlobal?: boolean;
 
+  // ✅ Generic credential store (JSON string in .env, parsed to object in UI)
+  providerCredentials?: Record<string, ProviderCredential>;
+
   // OpenCode-specific settings
-  opencodeProvider?: OpenCodeProviderType;
-  opencodeApiKey?: string;
-  opencodeApiKeyIsGlobal?: boolean;
+  opencodeProvider?: string;  // ✅ CHANGED: Normalized provider ID from credentials
   opencodeModel?: string;
+
+  // Legacy (backward compatibility)
+  claudeOAuthToken?: string;
+  claudeTokenIsGlobal?: boolean;
 }
 
-// Global Settings (already exists in settings.ts, add new providers)
+// Global Settings (already exists in settings.ts)
 interface AppSettings {
-  // ... existing global keys
-  globalClaudeOAuthToken?: string;
-  globalOpenAIApiKey?: string;
-  globalAnthropicApiKey?: string;
-  globalGoogleApiKey?: string;
-  globalGroqApiKey?: string;
+  // ... existing fields
+  globalDefaultProvider?: AgentProviderType;
 
-  // New global keys for additional providers
-  globalZaiApiKey?: string;
-  globalOpenRouterApiKey?: string;
-  globalBedrockApiKey?: string;
-  globalAzureApiKey?: string;
+  // ✅ Generic Credential Store (replaces individual global*ApiKey fields)
+  providerCredentials?: Record<string, ProviderCredential>;
+
+  // OpenCode defaults
+  globalOpencodeProvider?: string;  // ✅ CHANGED: Normalized provider ID
+  globalOpencodeModel?: string;
+
+  // Legacy global keys (keep for backward compatibility during migration)
+  globalClaudeOAuthToken?: string;  // Will be migrated to providerCredentials.claude
+  globalOpenAIApiKey?: string;      // Will be migrated to providerCredentials.openai
+  globalAnthropicApiKey?: string;   // Will be migrated to providerCredentials.anthropic
+  globalGoogleApiKey?: string;      // Will be migrated to providerCredentials.google
+  globalGroqApiKey?: string;        // Will be migrated to providerCredentials.groq
 }
 ```
 
@@ -966,7 +1281,39 @@ if (config.agentProvider) {
     : 'true';
 }
 
-// Claude Code configuration (follows existing pattern)
+// ✅ Generic Credential Store - serialize to JSON
+if (config.providerCredentials && Object.keys(config.providerCredentials).length > 0) {
+  const credentialsJson: Record<string, any> = {};
+
+  for (const [providerId, cred] of Object.entries(config.providerCredentials)) {
+    if (cred.isGlobal) {
+      // Inheriting from global - only store the flag
+      credentialsJson[providerId] = { isGlobal: true };
+    } else {
+      // Project-specific - store the full credential
+      credentialsJson[providerId] = {
+        isGlobal: false,
+        apiKey: cred.apiKey,
+        ...(cred.baseUrl && { baseUrl: cred.baseUrl }),
+        ...(cred.defaultModel && { model: cred.defaultModel }),
+        ...(cred.metadata && { metadata: cred.metadata })
+      };
+    }
+  }
+
+  existingVars['PROVIDER_CREDENTIALS'] = JSON.stringify(credentialsJson);
+}
+
+// OpenCode configuration
+if (config.agentProvider === 'opencode') {
+  existingVars['OPENCODE_PROVIDER'] = config.opencodeProvider || 'openai';
+
+  if (config.opencodeModel) {
+    existingVars['OPENCODE_MODEL'] = config.opencodeModel;
+  }
+}
+
+// Legacy Claude Code token (backward compatibility)
 if (config.claudeTokenIsGlobal === false && config.claudeOAuthToken) {
   // Project-specific token - write to .env
   existingVars['CLAUDE_CODE_OAUTH_TOKEN'] = config.claudeOAuthToken;
@@ -974,32 +1321,88 @@ if (config.claudeTokenIsGlobal === false && config.claudeOAuthToken) {
 } else if (config.claudeTokenIsGlobal === true) {
   // Using global token - set flag but don't write token value
   existingVars['CLAUDE_TOKEN_IS_GLOBAL'] = 'true';
-  // Token will be read from global settings at runtime
+}
+```
+
+**Helper Functions for UI:**
+```typescript
+// auto-claude-ui/src/renderer/utils/providerCredentials.ts
+
+/**
+ * ✅ Normalize provider name to consistent ID format
+ * Matches Python's normalize_provider_id() logic
+ *
+ * Examples:
+ * - "OpenAI" → "openai"
+ * - "Z.ai GLM" → "zai-glm"
+ * - "My Custom LLM" → "my-custom-llm"
+ */
+export function normalizeProviderId(name: string): string {
+  // Lowercase and replace spaces with hyphens
+  let normalized = name.toLowerCase().trim().replace(/\s+/g, '-');
+  // Remove special chars except hyphens and alphanumeric
+  normalized = normalized.replace(/[^a-z0-9-]/g, '');
+  // Remove consecutive hyphens
+  normalized = normalized.replace(/-+/g, '-');
+  // Trim leading/trailing hyphens
+  return normalized.replace(/^-+|-+$/g, '');
 }
 
-// OpenCode configuration (with inheritance)
-if (config.agentProvider === 'opencode') {
-  existingVars['OPENCODE_PROVIDER'] = config.opencodeProvider || 'openai';
+/**
+ * Get global credential for a specific provider from AppSettings
+ */
+export function getGlobalCredential(
+  globalSettings: AppSettings,
+  providerId: string
+): ProviderCredential | null {
+  return globalSettings.providerCredentials?.[providerId] || null;
+}
 
-  if (config.opencodeApiKeyIsGlobal === false && config.opencodeApiKey) {
-    // Project-specific API key - write to .env
-    existingVars['OPENCODE_API_KEY'] = config.opencodeApiKey;
-    existingVars['OPENCODE_API_KEY_IS_GLOBAL'] = 'false';
-  } else if (config.opencodeApiKeyIsGlobal === true) {
-    // Using global key - set flag but don't write key value
-    existingVars['OPENCODE_API_KEY_IS_GLOBAL'] = 'true';
-    // Key will be read from global settings at runtime
-  }
+/**
+ * Check if global credential exists and is configured for a provider
+ */
+export function hasGlobalCredential(
+  globalSettings: AppSettings,
+  providerId: string
+): boolean {
+  const cred = getGlobalCredential(globalSettings, providerId);
+  return !!(cred && cred.apiKey);
+}
 
-  if (config.opencodeModel) {
-    existingVars['OPENCODE_MODEL'] = config.opencodeModel;
+/**
+ * ✅ Get ALL configured provider IDs from global settings
+ * Used to populate OpenCode provider dropdown dynamically
+ */
+export function getConfiguredProviders(
+  globalSettings: AppSettings
+): ProviderCredential[] {
+  const credentials = globalSettings.providerCredentials || {};
+  return Object.values(credentials).filter(cred => cred.apiKey);
+}
+
+/**
+ * ✅ Get provider display name (with fallback to normalized ID)
+ */
+export function getProviderDisplayName(
+  globalSettings: AppSettings,
+  providerId: string
+): string {
+  const cred = getGlobalCredential(globalSettings, providerId);
+  if (cred?.displayName) {
+    return cred.displayName;
   }
+  // Fallback: Convert normalized ID to title case
+  return providerId.split('-').map(word =>
+    word.charAt(0).toUpperCase() + word.slice(1)
+  ).join(' ');
 }
 ```
 
 **Constants:**
 ```typescript
 // auto-claude-ui/src/shared/constants/providers.ts (NEW)
+
+// ✅ Only agent provider types are hardcoded (Claude Code vs OpenCode)
 export const AGENT_PROVIDERS = [
   {
     value: 'claude_code',
@@ -1010,20 +1413,32 @@ export const AGENT_PROVIDERS = [
   {
     value: 'opencode',
     label: 'OpenCode',
-    description: 'Multi-provider CLI supporting OpenAI, Google, AWS, and more',
-    features: ['Multi-Provider', 'Local Models', 'LSP Integration', 'SQLite Storage']
+    description: 'Multi-provider CLI supporting 20+ providers',
+    features: ['Multi-Provider', 'Local Models', 'LSP Integration', 'SQLite Storage', 'Fully Extensible']
   }
 ];
 
-export const OPENCODE_PROVIDERS = [
-  { value: 'openai', label: 'OpenAI', models: ['gpt-5o', 'gpt-5o-mini'], pricing: '$$$' },
-  { value: 'anthropic', label: 'Anthropic', models: ['claude-sonnet-4-5', 'claude-opus-4-5'], pricing: '$$$' },
-  { value: 'google', label: 'Google Gemini', models: ['gemini-2.0-flash', 'gemini-2.5-pro'], pricing: '$$' },
-  { value: 'bedrock', label: 'AWS Bedrock', models: ['anthropic.claude-v3-5'], pricing: '$$$' },
-  { value: 'groq', label: 'Groq', models: ['llama-3.3-70b'], pricing: '$' },
-  { value: 'azure', label: 'Azure OpenAI', models: ['gpt-5o'], pricing: '$$$' },
-  { value: 'zai', label: 'Z.ai GLM', models: ['glm-4.7'], pricing: '$', features: ['Advanced Thinking', 'Vibe Coding'] },
-  { value: 'openrouter', label: 'OpenRouter (400+ models)', models: ['auto', 'custom'], pricing: 'Variable', features: ['Auto-Fallback', 'Cost Optimization'] }
+// ✅ NO HARDCODED PROVIDER LIST!
+// OpenCode providers are DYNAMICALLY loaded from providerCredentials
+// This supports ANY provider without code changes:
+// - Standard: OpenAI, Anthropic, Google, Groq, AWS Bedrock, Azure
+// - Specialized: Z.ai GLM, OpenRouter, DeepSeek, Mistral
+// - Custom: Self-hosted LLMs, enterprise endpoints
+// - Future: Any new provider OpenCode adds (20+, 50+, 100+ providers)
+
+/**
+ * ✅ Suggested providers for quick setup (UI can show these as templates)
+ * Users can add ANY provider beyond this list
+ */
+export const SUGGESTED_PROVIDERS = [
+  { name: 'OpenAI', defaultModel: 'gpt-5o', requiresApiKey: true },
+  { name: 'Z.ai GLM', defaultModel: 'glm-4.7', requiresApiKey: true },
+  { name: 'OpenRouter', defaultModel: 'auto', requiresApiKey: true },
+  { name: 'Google Gemini', defaultModel: 'gemini-2.0-flash', requiresApiKey: true },
+  { name: 'Anthropic', defaultModel: 'claude-sonnet-4-5', requiresApiKey: true },
+  { name: 'AWS Bedrock', defaultModel: 'anthropic.claude-v3-5', requiresApiKey: true },
+  { name: 'Groq', defaultModel: 'llama-3.3-70b', requiresApiKey: true },
+  { name: 'Custom Provider', defaultModel: '', requiresApiKey: true, allowCustomEndpoint: true }
 ];
 ```
 
@@ -1489,12 +1904,36 @@ The plan now includes comprehensive UI-based provider selection with global/proj
 - PasswordInput for credentials
 - Type-safe TypeScript interfaces with `*_is_global` flags
 
-✅ **Key Architecture Decision**: Two-Tier Configuration
+✅ **Key Architecture Decisions**
+
+**1. Fully Dynamic Provider System** (Zero Hardcoding)
+- **✅ NO Provider Enums**: No `OpenCodeProviderType = 'openai' | 'zai' | ...`
+- **✅ Normalization Logic**: `normalizeProviderId("Z.ai GLM") → "zai-glm"`
+  - Lowercase, spaces → hyphens, remove special chars
+  - **Same logic in Python and TypeScript** (consistent normalization)
+- **✅ Runtime Discovery**: UI dropdown populated from `providerCredentials` store
+- **✅ Infinite Scalability**: Supports 20, 50, 100+ providers without code changes
+- **✅ User-Extensible**: Users can add ANY provider via "+ Add Provider" button
+- **Examples**:
+  - "Z.ai GLM 4.7" → `zai-glm-47`
+  - "My Company LLM" → `my-company-llm`
+  - "AWS Bedrock Claude" → `aws-bedrock-claude`
+
+**2. Generic Credential Store** (Scalable & Extensible)
+- **Single Dictionary**: `providerCredentials: Record<string, ProviderCredential>`
+- **No Schema Changes**: Add new providers without touching type definitions
+- **Display Names**: Human-readable names stored alongside normalized IDs
+- **Custom Endpoints**: Self-hosted LLMs via `baseUrl` field
+- **Backward Compatible**: Legacy `CLAUDE_CODE_OAUTH_TOKEN` still works
+- **Metadata Support**: Provider-specific config (subscription, features, region, etc.)
+
+**3. Two-Tier Configuration** (Global + Project Inheritance)
 - **Global Settings** (~/.config/auto-claude-ui/settings.json)
   - User-level defaults for all projects
-  - Set credentials ONCE, use everywhere
+  - Set credentials ONCE in `providerCredentials`, use everywhere
   - Never committed to git
 - **Project Settings** (.auto-claude/.env)
   - Per-project overrides when needed
-  - Inheritance flags track credential source
+  - `PROVIDER_CREDENTIALS` JSON with per-credential `isGlobal` flags
   - Supports different providers per project
+  - Mixed inheritance (some global, some project-specific)
