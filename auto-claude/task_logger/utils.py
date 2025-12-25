@@ -2,6 +2,8 @@
 Utility functions for task logging.
 """
 
+import os
+import sys
 from pathlib import Path
 
 from .logger import TaskLogger
@@ -22,14 +24,36 @@ def get_task_logger(
 
     Returns:
         TaskLogger instance or None if no spec_dir
+
+    Raises:
+        ValueError: If spec_dir does not exist or is not writable
     """
     global _current_logger
 
     if spec_dir is None:
         return _current_logger
 
+    spec_dir = Path(spec_dir)
+
+    # Validate spec directory exists
+    if not spec_dir.exists():
+        raise ValueError(
+            f"Spec directory does not exist: {spec_dir}\n" f"CWD: {os.getcwd()}"
+        )
+
+    # Validate spec directory is writable
+    if not os.access(spec_dir, os.W_OK):
+        raise ValueError(
+            f"Spec directory is not writable: {spec_dir}\n"
+            f"Permissions: {oct(spec_dir.stat().st_mode) if spec_dir.exists() else 'N/A'}"
+        )
+
+    # Create or reuse logger
     if _current_logger is None or _current_logger.spec_dir != spec_dir:
+        print(f"[TaskLogger] Creating new logger for {spec_dir}", file=sys.stderr)
         _current_logger = TaskLogger(spec_dir, emit_markers)
+    else:
+        print(f"[TaskLogger] Reusing existing logger for {spec_dir}", file=sys.stderr)
 
     return _current_logger
 

@@ -2,6 +2,8 @@
 Main TaskLogger class for logging task execution.
 """
 
+import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -46,6 +48,16 @@ class TaskLogger:
         self.current_session: int | None = None
         self.current_subtask: str | None = None
         self.storage = LogStorage(spec_dir)
+
+        # DEBUG: Log initialization details
+        print(
+            f"[TaskLogger] Initialized:\n"
+            f"  Spec dir: {self.spec_dir}\n"
+            f"  Log file: {self.log_file}\n"
+            f"  Spec dir exists: {self.spec_dir.exists()}\n"
+            f"  CWD: {os.getcwd()}",
+            file=sys.stderr,
+        )
 
     @property
     def _data(self) -> dict:
@@ -134,6 +146,12 @@ class TaskLogger:
         self.current_phase = phase
         phase_key = phase.value
 
+        # DEBUG: Log phase transition
+        print(
+            f"[TaskLogger] Starting phase {phase_key}: {message or 'No message'}",
+            file=sys.stderr,
+        )
+
         # Auto-close any other active phases (handles restart/recovery scenarios)
         for other_phase_key, phase_data in self._data["phases"].items():
             if other_phase_key != phase_key and phase_data.get("status") == "active":
@@ -188,6 +206,13 @@ class TaskLogger:
             message: Optional message to log at phase end
         """
         phase_key = phase.value
+
+        # DEBUG: Log phase completion
+        print(
+            f"[TaskLogger] Ending phase {phase_key} "
+            f"(success={success}): {message or 'No message'}",
+            file=sys.stderr,
+        )
 
         # Update phase status
         status = "completed" if success else "failed"

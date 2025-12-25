@@ -281,6 +281,18 @@ export class AgentProcessManager {
     // Handle stderr - explicitly decode as UTF-8 for cross-platform Unicode support
     childProcess.stderr?.on('data', (data: Buffer) => {
       const log = data.toString('utf8');
+
+      // Check for TaskLogger errors
+      if (log.includes('[TaskLogger] ERROR:')) {
+        console.error(`[Agent:${taskId}] TaskLogger error detected:`, log.trim());
+        this.emitter.emit('error', taskId, `TaskLogger failed: ${log.trim()}`);
+      }
+
+      // Log all TaskLogger debug output
+      if (log.includes('[TaskLogger]')) {
+        console.log(`[Agent:${taskId}] TaskLogger debug:`, log.trim());
+      }
+
       // Some Python output goes to stderr (like progress bars)
       // so we treat it as log, not error
       this.emitter.emit('log', taskId, log);
