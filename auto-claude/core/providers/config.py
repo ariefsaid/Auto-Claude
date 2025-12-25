@@ -304,3 +304,127 @@ def is_global_provider() -> bool:
     """
     is_global_str = os.environ.get("AGENT_PROVIDER_IS_GLOBAL", "").lower()
     return is_global_str in ("true", "1", "yes")
+
+
+@dataclass
+class ProviderConfig:
+    """
+    Configuration for the multi-provider backend abstraction layer.
+
+    Supports dynamic credential loading from environment variables with
+    global/project inheritance and legacy token compatibility.
+
+    Attributes:
+        provider: Active agent provider (claude_code or opencode)
+        is_global: Whether the provider setting is from global settings
+        credentials: Dictionary of provider credentials (provider_id -> ProviderCredential)
+        opencode_provider: LLM provider for OpenCode to use (e.g., openai, anthropic)
+        opencode_model: Model for OpenCode to use (e.g., gpt-4o-mini)
+    """
+
+    provider: AgentProvider = field(default_factory=AgentProvider.default)
+    is_global: bool = False
+    credentials: dict[str, ProviderCredential] = field(default_factory=dict)
+    opencode_provider: str = ""
+    opencode_model: str = ""
+
+    @classmethod
+    def from_env(cls) -> "ProviderConfig":
+        """
+        Create ProviderConfig from environment variables.
+
+        Environment Variables:
+            AGENT_PROVIDER: Active provider (claude_code|opencode) - default: claude_code
+            AGENT_PROVIDER_IS_GLOBAL: Whether using global provider setting
+            PROVIDER_CREDENTIALS: JSON object with provider credentials
+            OPENCODE_PROVIDER: LLM provider for OpenCode (openai|anthropic|etc.)
+            OPENCODE_MODEL: Model for OpenCode (e.g., gpt-4o-mini)
+
+        Legacy support:
+            CLAUDE_CODE_OAUTH_TOKEN: OAuth token for Claude Code API
+            CLAUDE_TOKEN_IS_GLOBAL: Legacy global flag for Claude token
+
+        Returns:
+            ProviderConfig instance with loaded settings
+        """
+        # Get active provider
+        provider = get_active_provider()
+
+        # Check if global setting
+        is_global = is_global_provider()
+
+        # Parse credentials from JSON
+        credentials_json = os.environ.get("PROVIDER_CREDENTIALS", "")
+        credentials = {}
+
+        if credentials_json:
+            try:
+                credentials = parse_provider_credentials(credentials_json)
+            except ValueError:
+                # Invalid JSON - silently use empty credentials
+                # Validation will catch missing required credentials later
+                pass
+
+        # Load legacy Claude Code credentials if not already present
+        if "claude-code" not in credentials:
+            legacy_cred = ProviderCredential.from_env_legacy_claude()
+            if legacy_cred:
+                credentials["claude-code"] = legacy_cred
+
+        # OpenCode configuration
+        opencode_provider = os.environ.get("OPENCODE_PROVIDER", "").lower()
+        opencode_model = os.environ.get("OPENCODE_MODEL", "")
+
+        return cls(
+            provider=provider,
+            is_global=is_global,
+            credentials=credentials,
+            opencode_provider=opencode_provider,
+            opencode_model=opencode_model,
+        )
+
+    def get_credential(self, provider_id: str) -> Optional[ProviderCredential]:
+        """
+        Get credential for a specific provider.
+
+        Args:
+            provider_id: Provider ID to look up (will be normalized)
+
+        Returns:
+            ProviderCredential if found, None otherwise
+        """
+        from .utils import normalize_provider_id
+
+        normalized = normalize_provider_id(provider_id)
+        return self.credentials.get(normalized)
+
+    def get_active_credential(self) -> Optional[ProviderCredential]:
+        """
+        Get credential for the currently active provider.
+
+        Returns:
+            ProviderCredential for active provider, or None if not configured
+        """
+        if self.provider == AgentProvider.CLAUDE_CODE:
+            return self.get_credential("claude-code")
+        elif self.provider == AgentProvider.OPENCODE:
+            # For OpenCode, get credential for the configured LLM provider
+            if self.opencode_provider:
+                return self.get_credential(self.opencode_provider)
+        return None
+
+    def get_credential_source_info(self) -> str:
+        """
+        Get information about the credential source.
+
+        Returns:
+            Human-readable description of credential source
+        """
+        cred = self.get_active_credential()
+        if cred:
+            return cred.get_source_info()
+
+        if self.is_global:
+            return f"{self.provider.value} (global settings, no credential)"
+        else:
+            return f"{self.provider.value} (project settings, no credential)"
