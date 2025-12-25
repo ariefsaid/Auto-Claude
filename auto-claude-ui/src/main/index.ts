@@ -1,6 +1,7 @@
 import { app, BrowserWindow, shell, nativeImage } from 'electron';
 import { join } from 'path';
 import { electronApp, optimizer, is } from '@electron-toolkit/utils';
+import fixPath from 'fix-path';
 import { setupIpcHandlers } from './ipc-setup';
 import { AgentManager } from './agent';
 import { TerminalManager } from './terminal-manager';
@@ -8,6 +9,10 @@ import { pythonEnvManager } from './python-env-manager';
 import { getUsageMonitor } from './claude-profile/usage-monitor';
 import { initializeUsageMonitorForwarding } from './ipc-handlers/terminal-handlers';
 import { initializeAppUpdater } from './app-updater';
+
+// Fix PATH on macOS - Electron doesn't inherit shell PATH by default
+// This ensures spawned processes can find binaries like python3, git, etc.
+fixPath();
 
 // Get icon path based on platform
 function getIconPath(): string {

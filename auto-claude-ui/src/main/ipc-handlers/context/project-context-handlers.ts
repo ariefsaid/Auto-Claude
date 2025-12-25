@@ -21,6 +21,7 @@ import {
   buildMemoryStatus
 } from './memory-status-handlers';
 import { loadFileBasedMemories } from './memory-data-handlers';
+import { findPythonCommand, parsePythonCommand } from '../../python-detector';
 
 /**
  * Load project index from file
@@ -157,9 +158,21 @@ export function registerProjectContextHandlers(
         const analyzerPath = path.join(autoBuildSource, 'analyzer.py');
         const indexOutputPath = path.join(project.path, AUTO_BUILD_PATHS.PROJECT_INDEX);
 
+        // Detect Python command
+        const pythonCmd = findPythonCommand();
+        if (!pythonCmd) {
+          return {
+            success: false,
+            error: 'Python 3 not found. Please install Python 3 or configure the Python path in Settings.'
+          };
+        }
+
+        const [pythonExe, baseArgs] = parsePythonCommand(pythonCmd);
+
         // Run analyzer
         await new Promise<void>((resolve, reject) => {
-          const proc = spawn('python', [
+          const proc = spawn(pythonExe, [
+            ...baseArgs,
             analyzerPath,
             '--project-dir', project.path,
             '--output', indexOutputPath
@@ -168,15 +181,25 @@ export function registerProjectContextHandlers(
             env: { ...process.env }
           });
 
+          let stderr = '';
+          proc.stderr?.on('data', (data) => {
+            stderr += data.toString();
+          });
+
           proc.on('close', (code: number) => {
             if (code === 0) {
               resolve();
             } else {
-              reject(new Error(`Analyzer exited with code ${code}`));
+              const errorMsg = stderr
+                ? `Analyzer failed: ${stderr.trim()}`
+                : `Analyzer exited with code ${code}`;
+              reject(new Error(errorMsg));
             }
           });
 
-          proc.on('error', reject);
+          proc.on('error', (err) => {
+            reject(new Error(`Failed to run analyzer: ${err.message}`));
+          });
         });
 
         // Read the new index
