@@ -30,6 +30,20 @@ export function registerTaskExecutionHandlers(
         return;
       }
 
+      // Defensive slot limit check (frontend should handle this, but backend validates)
+      const runningTasks = agentManager.getRunningTasks();
+      const MAX_PARALLEL_TASKS = 3;  // Hard limit for safety
+
+      if (runningTasks.length >= MAX_PARALLEL_TASKS) {
+        console.warn('[TASK_START] Parallel limit reached:', runningTasks.length);
+        mainWindow.webContents.send(
+          IPC_CHANNELS.TASK_ERROR,
+          taskId,
+          `Maximum parallel tasks (${MAX_PARALLEL_TASKS}) already running. Please wait for a task to complete.`
+        );
+        return;
+      }
+
       // Find task and project
       const { task, project } = findTaskAndProject(taskId);
 
@@ -765,6 +779,26 @@ export function registerTaskExecutionHandlers(
         return {
           success: false,
           error: error instanceof Error ? error.message : 'Failed to recover task'
+        };
+      }
+    }
+  );
+
+  /**
+   * Get count of currently running tasks (for parallel control)
+   */
+  ipcMain.handle(
+    IPC_CHANNELS.TASK_GET_RUNNING_COUNT,
+    async (): Promise<IPCResult<number>> => {
+      try {
+        const runningTasks = agentManager.getRunningTasks();
+        return { success: true, data: runningTasks.length };
+      } catch (error) {
+        console.error('Failed to get running task count:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to get running task count',
+          data: 0
         };
       }
     }

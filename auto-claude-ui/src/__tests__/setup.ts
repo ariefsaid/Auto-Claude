@@ -88,7 +88,9 @@ if (typeof window !== 'undefined') {
       success: true,
       data: { openProjectIds: [], activeProjectId: null, tabOrder: [] }
     }),
-    saveTabState: vi.fn().mockResolvedValue({ success: true })
+    saveTabState: vi.fn().mockResolvedValue({ success: true }),
+    // Parallel task control
+    getRunningTaskCount: vi.fn().mockResolvedValue({ success: true, data: 0 })
   };
 }
 

@@ -28,6 +28,7 @@ export const IPC_CHANNELS = {
   TASK_UPDATE_STATUS: 'task:updateStatus',
   TASK_RECOVER_STUCK: 'task:recoverStuck',
   TASK_CHECK_RUNNING: 'task:checkRunning',
+  TASK_GET_RUNNING_COUNT: 'task:getRunningCount',  // Get count of running tasks for parallel control
 
   // Workspace management (for human review)
   // Per-spec architecture: Each spec has its own worktree at .worktrees/{spec-name}/
@@ -46,6 +47,7 @@ export const IPC_CHANNELS = {
   TASK_LOG: 'task:log',
   TASK_STATUS_CHANGE: 'task:statusChange',
   TASK_EXECUTION_PROGRESS: 'task:executionProgress',
+  CONTEXT_EXHAUSTED: 'context:exhausted',  // Context window exhaustion event
 
   // Task phase logs (persistent, collapsible logs by phase)
   TASK_LOGS_GET: 'task:logsGet',           // Load logs from spec dir

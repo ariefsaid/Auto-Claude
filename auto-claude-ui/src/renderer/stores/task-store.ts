@@ -7,6 +7,10 @@ interface TaskState {
   isLoading: boolean;
   error: string | null;
 
+  // Parallel execution control
+  maxParallelTasks: number;
+  taskQueue: string[];  // Task IDs waiting for execution slots
+
   // Actions
   setTasks: (tasks: Task[]) => void;
   addTask: (task: Task) => void;
@@ -20,16 +24,52 @@ interface TaskState {
   setError: (error: string | null) => void;
   clearTasks: () => void;
 
+  // Queue management actions
+  setMaxParallelTasks: (max: number) => void;
+  queueTask: (taskId: string, reason?: 'slot_limit' | 'manual_hold') => void;
+  dequeueTask: (taskId: string) => void;
+  processQueue: () => Promise<void>;
+
   // Selectors
   getSelectedTask: () => Task | undefined;
   getTasksByStatus: (status: TaskStatus) => Task[];
 }
+
+// Load parallel execution settings from localStorage
+const loadParallelSettings = (): { maxParallelTasks: number } => {
+  try {
+    const stored = localStorage.getItem('parallel-execution-settings');
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      return { maxParallelTasks: parsed.maxParallelTasks || 2 };
+    }
+  } catch (error) {
+    console.error('Failed to load parallel execution settings:', error);
+  }
+  return { maxParallelTasks: 2 };  // Default to 2
+};
+
+// Save parallel execution settings to localStorage
+const saveParallelSettings = (maxParallelTasks: number): void => {
+  try {
+    localStorage.setItem('parallel-execution-settings', JSON.stringify({
+      maxParallelTasks,
+      version: 1
+    }));
+  } catch (error) {
+    console.error('Failed to save parallel execution settings:', error);
+  }
+};
 
 export const useTaskStore = create<TaskState>((set, get) => ({
   tasks: [],
   selectedTaskId: null,
   isLoading: false,
   error: null,
+
+  // Initialize parallel execution settings from localStorage
+  ...loadParallelSettings(),
+  taskQueue: [],
 
   setTasks: (tasks) => set({ tasks }),
 
@@ -45,20 +85,43 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       )
     })),
 
-  updateTaskStatus: (taskId, status) =>
+  updateTaskStatus: (taskId, status) => {
+    // Update status - NO slot checking here
+    // Slot checking happens in startTask() before calling backend
     set((state) => ({
       tasks: state.tasks.map((t) => {
         if (t.id !== taskId && t.specId !== taskId) return t;
 
         // When status goes to backlog, reset execution progress to idle
         // This ensures the planning/coding animation stops when task is stopped
+        // Also clear queue metadata if task was queued
         const executionProgress = status === 'backlog'
           ? { phase: 'idle' as ExecutionPhase, phaseProgress: 0, overallProgress: 0 }
           : t.executionProgress;
 
-        return { ...t, status, executionProgress, updatedAt: new Date() };
+        const updates: Partial<Task> = {
+          status,
+          executionProgress,
+          updatedAt: new Date()
+        };
+
+        // Clear queue metadata when task moves out of queue
+        if (status !== 'backlog' || !t.queuedAt) {
+          updates.queuedAt = undefined;
+          updates.queuePosition = undefined;
+          updates.queueReason = undefined;
+        }
+
+        return { ...t, ...updates };
       })
-    })),
+    }));
+
+    // Trigger queue processing when task moves to human_review
+    // (ai_review still holds slot - QA agent is using API)
+    if (status === 'human_review') {
+      setTimeout(() => get().processQueue(), 100);
+    }
+  },
 
   updateTaskFromPlan: (taskId, plan) =>
     set((state) => ({
@@ -183,6 +246,104 @@ export const useTaskStore = create<TaskState>((set, get) => ({
 
   clearTasks: () => set({ tasks: [], selectedTaskId: null }),
 
+  // Queue management actions
+  setMaxParallelTasks: (max) => {
+    saveParallelSettings(max);
+    set({ maxParallelTasks: max });
+    // Trigger queue processing if limit increased
+    setTimeout(() => get().processQueue(), 100);
+  },
+
+  queueTask: (taskId, reason = 'slot_limit') => {
+    const state = get();
+
+    // Don't queue if already queued
+    if (state.taskQueue.includes(taskId)) {
+      return;
+    }
+
+    // Add to queue
+    set((state2) => ({
+      taskQueue: [...state2.taskQueue, taskId],
+      tasks: state2.tasks.map((t) => {
+        if (t.id !== taskId && t.specId !== taskId) return t;
+
+        return {
+          ...t,
+          queuedAt: new Date(),
+          queuePosition: state2.taskQueue.length + 1,
+          queueReason: reason,
+          // Keep status as backlog when queued
+          status: 'backlog' as TaskStatus,
+          updatedAt: new Date()
+        };
+      })
+    }));
+  },
+
+  dequeueTask: (taskId) => {
+    set((state) => ({
+      taskQueue: state.taskQueue.filter(id => id !== taskId),
+      tasks: state.tasks.map((t) => {
+        if (t.id !== taskId && t.specId !== taskId) return t;
+
+        return {
+          ...t,
+          queuedAt: undefined,
+          queuePosition: undefined,
+          queueReason: undefined,
+          updatedAt: new Date()
+        };
+      })
+    }));
+
+    // Update queue positions for remaining tasks
+    const state = get();
+    set({
+      tasks: state.tasks.map((t) => {
+        const queueIndex = state.taskQueue.indexOf(t.id);
+        if (queueIndex >= 0) {
+          return { ...t, queuePosition: queueIndex + 1 };
+        }
+        return t;
+      })
+    });
+  },
+
+  processQueue: async () => {
+    const state = get();
+
+    if (state.taskQueue.length === 0) {
+      return;
+    }
+
+    try {
+      const runningCount = await getRunningTaskCount();
+      const availableSlots = state.maxParallelTasks - runningCount;
+
+      if (availableSlots <= 0) {
+        return;
+      }
+
+      // Start as many queued tasks as we have available slots
+      const tasksToStart = state.taskQueue.slice(0, availableSlots);
+
+      console.log(`[processQueue] Processing ${tasksToStart.length} queued tasks (${availableSlots} slots available)`);
+
+      for (const taskId of tasksToStart) {
+        // Dequeue the task first
+        state.dequeueTask(taskId);
+
+        // Start the task directly (we've already checked slots above)
+        console.log(`[processQueue] Starting queued task:`, taskId);
+        window.electronAPI.startTask(taskId);
+      }
+    } catch (error) {
+      console.error('Failed to process task queue:', error);
+    }
+  },
+
+  // Selectors
   getSelectedTask: () => {
     const state = get();
     return state.tasks.find((t) => t.id === state.selectedTaskId);
@@ -243,10 +404,29 @@ export async function createTask(
 }
 
 /**
- * Start a task
+ * Start a task with slot checking
  */
-export function startTask(taskId: string, options?: { parallel?: boolean; workers?: number }): void {
-  window.electronAPI.startTask(taskId, options);
+export async function startTask(taskId: string, options?: { parallel?: boolean; workers?: number }): Promise<void> {
+  const state = useTaskStore.getState();
+
+  try {
+    // Check if we have available slots
+    const runningCount = await getRunningTaskCount();
+    if (runningCount >= state.maxParallelTasks) {
+      // No slots available - queue the task
+      console.log(`[startTask] Slot limit reached (${runningCount}/${state.maxParallelTasks}), queueing task:`, taskId);
+      state.queueTask(taskId, 'slot_limit');
+      return;
+    }
+
+    // Slot available - start the task
+    console.log(`[startTask] Starting task (${runningCount + 1}/${state.maxParallelTasks}):`, taskId);
+    window.electronAPI.startTask(taskId, options);
+  } catch (error) {
+    console.error('Failed to check slots before starting task:', error);
+    // Fallback: allow task to start if check fails
+    window.electronAPI.startTask(taskId, options);
+  }
 }
 
 /**
@@ -346,6 +526,19 @@ export async function checkTaskRunning(taskId: string): Promise<boolean> {
   } catch (error) {
     console.error('Error checking task running status:', error);
     return false;
+  }
+}
+
+/**
+ * Get the count of currently running tasks
+ */
+export async function getRunningTaskCount(): Promise<number> {
+  try {
+    const result = await window.electronAPI.getRunningTaskCount();
+    return result.success && typeof result.data === 'number' ? result.data : 0;
+  } catch (error) {
+    console.error('Error getting running task count:', error);
+    return 0;
   }
 }
 

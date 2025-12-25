@@ -74,6 +74,8 @@ export const taskMock = {
 
   checkTaskRunning: async () => ({ success: true, data: false }),
 
+  getRunningTaskCount: async () => ({ success: true, data: 0 }),
+
   // Task logs operations
   getTaskLogs: async () => ({
     success: true,
