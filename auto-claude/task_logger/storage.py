@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -67,27 +68,94 @@ class LogStorage:
         }
 
     def save(self) -> None:
-        """Save logs to file atomically to prevent corruption from concurrent reads."""
+        """
+        Save logs to file atomically to prevent corruption from concurrent reads.
+
+        Uses retry logic with exponential backoff to handle transient failures.
+        Raises OSError with detailed context if save fails after retries.
+
+        Raises:
+            OSError: If save fails after all retry attempts
+        """
         self._data["updated_at"] = self._timestamp()
+
+        # Ensure directory exists
         try:
             self.spec_dir.mkdir(parents=True, exist_ok=True)
-            # Write to temp file first, then atomic rename to prevent corruption
-            # when the UI reads mid-write
-            fd, tmp_path = tempfile.mkstemp(
-                dir=self.spec_dir, prefix=".task_logs_", suffix=".tmp"
-            )
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    json.dump(self._data, f, indent=2, ensure_ascii=False)
-                # Atomic rename (on POSIX systems, rename is atomic)
-                os.replace(tmp_path, self.log_file)
-            except Exception:
-                # Clean up temp file on failure
-                if os.path.exists(tmp_path):
-                    os.unlink(tmp_path)
-                raise
         except OSError as e:
-            print(f"Warning: Failed to save task logs: {e}", file=sys.stderr)
+            raise OSError(
+                f"Failed to create spec directory {self.spec_dir}: {e}"
+            ) from e
+
+        # Retry logic for transient failures
+        max_retries = 3
+        retry_delay = 0.1  # seconds
+
+        for attempt in range(max_retries):
+            tmp_path = None
+            try:
+                # Create temp file
+                fd, tmp_path = tempfile.mkstemp(
+                    dir=self.spec_dir, prefix=".task_logs_", suffix=".tmp"
+                )
+
+                # Validate file descriptor
+                if fd < 0:
+                    raise OSError(f"Invalid file descriptor: {fd}")
+
+                # Write data
+                try:
+                    with os.fdopen(fd, "w", encoding="utf-8") as f:
+                        json.dump(self._data, f, indent=2, ensure_ascii=False)
+                except Exception as e:
+                    # Cleanup on write failure
+                    if tmp_path and os.path.exists(tmp_path):
+                        try:
+                            os.unlink(tmp_path)
+                        except Exception:
+                            pass
+                    raise OSError(f"Failed to write task logs: {e}") from e
+
+                # Atomic rename
+                os.replace(tmp_path, self.log_file)
+
+                # Verify file was written
+                if not self.log_file.exists():
+                    raise OSError(f"Task log file missing after save: {self.log_file}")
+
+                # Success - log for debugging
+                print(
+                    f"[TaskLogger] Saved {self.log_file} "
+                    f"(attempt {attempt + 1}/{max_retries})",
+                    file=sys.stderr,
+                )
+                return  # Success!
+
+            except OSError as e:
+                # Cleanup temp file if it exists
+                if tmp_path and os.path.exists(tmp_path):
+                    try:
+                        os.unlink(tmp_path)
+                    except Exception:
+                        pass
+
+                # Last attempt - raise exception with detailed context
+                if attempt == max_retries - 1:
+                    error_msg = (
+                        f"Failed to save task logs after {max_retries} attempts:\n"
+                        f"  Spec dir: {self.spec_dir}\n"
+                        f"  Log file: {self.log_file}\n"
+                        f"  Error: {e}\n"
+                        f"  CWD: {os.getcwd()}\n"
+                        f"  Spec dir exists: {self.spec_dir.exists()}\n"
+                        f"  Spec dir writable: {os.access(self.spec_dir, os.W_OK) if self.spec_dir.exists() else 'N/A'}"
+                    )
+                    print(f"[TaskLogger] ERROR: {error_msg}", file=sys.stderr)
+                    raise OSError(error_msg) from e
+
+                # Wait before retry
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Exponential backoff
 
     def _timestamp(self) -> str:
         """Get current timestamp in ISO format."""
