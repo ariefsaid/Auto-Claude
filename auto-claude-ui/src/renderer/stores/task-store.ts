@@ -85,27 +85,11 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       )
     })),
 
-  updateTaskStatus: async (taskId, status) => {
-    const state = get();
-
-    // Check slot limit when moving to in_progress
-    if (status === 'in_progress') {
-      try {
-        const runningCount = await getRunningTaskCount();
-        if (runningCount >= state.maxParallelTasks) {
-          // Slot limit reached - queue the task
-          state.queueTask(taskId, 'slot_limit');
-          return;
-        }
-      } catch (error) {
-        console.error('Failed to check running task count:', error);
-        // Fallback: allow the task to start if check fails
-      }
-    }
-
-    // Update status
-    set((state2) => ({
-      tasks: state2.tasks.map((t) => {
+  updateTaskStatus: (taskId, status) => {
+    // Update status - NO slot checking here
+    // Slot checking happens in startTask() before calling backend
+    set((state) => ({
+      tasks: state.tasks.map((t) => {
         if (t.id !== taskId && t.specId !== taskId) return t;
 
         // When status goes to backlog, reset execution progress to idle
@@ -344,12 +328,15 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       // Start as many queued tasks as we have available slots
       const tasksToStart = state.taskQueue.slice(0, availableSlots);
 
+      console.log(`[processQueue] Processing ${tasksToStart.length} queued tasks (${availableSlots} slots available)`);
+
       for (const taskId of tasksToStart) {
-        // Dequeue the task
+        // Dequeue the task first
         state.dequeueTask(taskId);
 
-        // Update status to in_progress (will trigger task start via IPC)
-        await persistTaskStatus(taskId, 'in_progress');
+        // Start the task directly (we've already checked slots above)
+        console.log(`[processQueue] Starting queued task:`, taskId);
+        window.electronAPI.startTask(taskId);
       }
     } catch (error) {
       console.error('Failed to process task queue:', error);
@@ -417,10 +404,29 @@ export async function createTask(
 }
 
 /**
- * Start a task
+ * Start a task with slot checking
  */
-export function startTask(taskId: string, options?: { parallel?: boolean; workers?: number }): void {
-  window.electronAPI.startTask(taskId, options);
+export async function startTask(taskId: string, options?: { parallel?: boolean; workers?: number }): Promise<void> {
+  const state = useTaskStore.getState();
+
+  try {
+    // Check if we have available slots
+    const runningCount = await getRunningTaskCount();
+    if (runningCount >= state.maxParallelTasks) {
+      // No slots available - queue the task
+      console.log(`[startTask] Slot limit reached (${runningCount}/${state.maxParallelTasks}), queueing task:`, taskId);
+      state.queueTask(taskId, 'slot_limit');
+      return;
+    }
+
+    // Slot available - start the task
+    console.log(`[startTask] Starting task (${runningCount + 1}/${state.maxParallelTasks}):`, taskId);
+    window.electronAPI.startTask(taskId, options);
+  } catch (error) {
+    console.error('Failed to check slots before starting task:', error);
+    // Fallback: allow task to start if check fails
+    window.electronAPI.startTask(taskId, options);
+  }
 }
 
 /**
