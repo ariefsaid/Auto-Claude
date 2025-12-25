@@ -58,7 +58,7 @@ export function PhaseCard({
       </div>
 
       {/* Milestones */}
-      {phase.milestones.length > 0 && (
+      {(phase.milestones?.length ?? 0) > 0 && (
         <div className="mb-4">
           <h4 className="text-sm font-medium mb-2">Milestones</h4>
           <div className="space-y-2">

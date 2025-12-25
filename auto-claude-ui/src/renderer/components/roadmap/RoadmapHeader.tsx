@@ -33,8 +33,8 @@ export function RoadmapHeader({ roadmap, competitorAnalysis, onAddFeature, onRef
                   <div className="space-y-2">
                     <div className="font-semibold">Click to view detailed analysis</div>
                     <div className="text-sm text-muted-foreground">
-                      Analyzed {competitorAnalysis.competitors.length} competitors with {' '}
-                      {competitorAnalysis.competitors.reduce((sum, c) => sum + c.painPoints.length, 0)} pain points identified
+                      Analyzed {competitorAnalysis.competitors?.length ?? 0} competitors with {' '}
+                      {competitorAnalysis.competitors?.reduce((sum, c) => sum + (c.painPoints?.length ?? 0), 0) ?? 0} pain points identified
                     </div>
                   </div>
                 </TooltipContent>
@@ -103,7 +103,7 @@ export function RoadmapHeader({ roadmap, competitorAnalysis, onAddFeature, onRef
         </div>
         <div className="flex items-center gap-2">
           <span className="text-sm">
-            <span className="font-semibold">{roadmap.phases.length}</span>
+            <span className="font-semibold">{roadmap.phases?.length ?? 0}</span>
             <span className="text-muted-foreground"> phases</span>
           </span>
         </div>

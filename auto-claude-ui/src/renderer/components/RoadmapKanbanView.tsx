@@ -197,7 +197,7 @@ export function RoadmapKanbanView({
   const featuresByStatus = useMemo(() => {
     const grouped: Record<string, RoadmapFeature[]> = {};
     ROADMAP_STATUS_COLUMNS.forEach((column) => {
-      grouped[column.id] = roadmap.features.filter((f) => f.status === column.id);
+      grouped[column.id] = roadmap.features?.filter((f) => f.status === column.id) ?? [];
     });
     return grouped;
   }, [roadmap.features]);

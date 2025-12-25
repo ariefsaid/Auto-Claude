@@ -16,7 +16,7 @@ import type {
 function migrateRoadmapIfNeeded(roadmap: Roadmap): Roadmap {
   let needsMigration = false;
 
-  const migratedFeatures = roadmap.features.map((feature) => {
+  const migratedFeatures = roadmap.features?.map((feature) => {
     const migratedFeature = { ...feature };
 
     // Migrate 'idea' status to 'under_review'
@@ -32,7 +32,7 @@ function migrateRoadmapIfNeeded(roadmap: Roadmap): Roadmap {
     }
 
     return migratedFeature;
-  });
+  }) ?? [];
 
   if (needsMigration) {
     console.log('[Roadmap] Migrated roadmap data to latest schema');

@@ -112,7 +112,7 @@ export function AddFeatureDialog({
       setDescription('');
       setRationale('');
       setPriority('should');
-      setPhaseId(defaultPhaseId || (phases.length > 0 ? phases[0].id : ''));
+      setPhaseId(defaultPhaseId || ((phases?.length ?? 0) > 0 ? phases[0].id : ''));
       setComplexity('medium');
       setImpact('medium');
       setError(null);
@@ -255,7 +255,7 @@ export function AddFeatureDialog({
                   <SelectValue placeholder="Select phase" />
                 </SelectTrigger>
                 <SelectContent>
-                  {phases.map((phase) => (
+                  {phases?.map((phase) => (
                     <SelectItem key={phase.id} value={phase.id}>
                       {phase.order}. {phase.name}
                     </SelectItem>
