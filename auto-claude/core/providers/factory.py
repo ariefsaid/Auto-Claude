@@ -32,13 +32,14 @@ Usage:
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from .client import AgentClient, ProviderError, ProviderNotFoundError
 from .config import AgentProvider, ProviderConfig
 
 if TYPE_CHECKING:
     from .adapters.claude_provider import ClaudeProvider
+    from .adapters.opencode_provider import OpenCodeProvider
 
 logger = logging.getLogger(__name__)
 
@@ -170,12 +171,12 @@ def _create_opencode_provider(
     config: ProviderConfig,
     project_dir: Path,
     model: str,
-) -> Any:
+) -> "OpenCodeProvider":
     """
     Create an OpenCodeProvider instance.
 
-    Note: OpenCodeProvider is implemented in a subsequent subtask.
-    This function provides the factory integration point.
+    Uses the OpenCodeProvider.from_parameters factory method to create
+    a properly configured provider with subprocess management.
 
     Args:
         config: ProviderConfig with OpenCode settings
@@ -186,36 +187,40 @@ def _create_opencode_provider(
         OpenCodeProvider instance ready for use
 
     Raises:
-        ProviderError: If OpenCode provider is not yet implemented or creation fails
+        ProviderError: If OpenCode provider creation fails
     """
+    # Determine effective model (config takes precedence)
+    effective_model = config.opencode_model or model
+
     logger.info(
-        f"Creating OpenCode provider with provider: {config.opencode_provider}, "
-        f"model: {config.opencode_model or model}"
+        f"Creating OpenCode provider with LLM provider: {config.opencode_provider}, "
+        f"model: {effective_model}"
     )
 
     try:
-        # Import OpenCodeProvider when it's implemented
+        # Import OpenCodeProvider
         from .adapters.opencode_provider import OpenCodeProvider
 
         # Get credential for the LLM provider
         credential = config.get_credential(config.opencode_provider)
-        api_key = credential.api_key if credential else ""
+        api_key = credential.api_key if credential else None
 
-        return OpenCodeProvider(
-            project_dir=project_dir,
+        # Use factory method that handles subprocess configuration
+        return OpenCodeProvider.from_parameters(
             provider=config.opencode_provider,
-            model=config.opencode_model or model,
+            model=effective_model,
             api_key=api_key,
+            working_dir=project_dir,
         )
-    except ImportError:
+    except ImportError as e:
         raise ProviderError(
             provider="opencode",
             message=(
-                "OpenCode provider is not yet implemented. "
-                "This will be available in a future update."
+                "OpenCode provider module not found. "
+                "Ensure OpenCode adapters are properly installed."
             ),
-            details={"status": "not_implemented"},
-        )
+            details={"status": "import_error", "original_error": str(e)},
+        ) from e
     except Exception as e:
         raise ProviderError(
             provider="opencode",
