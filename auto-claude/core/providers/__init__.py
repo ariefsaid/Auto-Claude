@@ -46,7 +46,17 @@ Usage:
     )
 """
 
+from .client import (
+    AgentClient,
+    ConversationContext,
+    ProviderCapabilities,
+    ProviderConnectionError,
+    ProviderError,
+    ProviderNotFoundError,
+    ProviderTimeoutError,
+)
 from .config import AgentProvider, ProviderConfig, ProviderCredential
+from .factory import create_client, get_available_providers, is_provider_available
 from .messages import (
     ContentBlock,
     TextContent,
@@ -61,12 +71,25 @@ __all__ = [
     "AgentProvider",
     "ProviderConfig",
     "ProviderCredential",
+    # Client protocol and types
+    "AgentClient",
+    "ProviderCapabilities",
+    "ConversationContext",
+    # Exceptions
+    "ProviderError",
+    "ProviderNotFoundError",
+    "ProviderConnectionError",
+    "ProviderTimeoutError",
     # Message types
     "UniversalMessage",
     "TextContent",
     "ToolUseContent",
     "ToolResultContent",
     "ContentBlock",
+    # Factory functions
+    "create_client",
+    "get_available_providers",
+    "is_provider_available",
     # Utility functions
     "normalize_provider_id",
 ]
