@@ -104,6 +104,112 @@ class ProviderCapabilities:
             "supports_extended_thinking": self.supports_extended_thinking,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, bool]) -> "ProviderCapabilities":
+        """
+        Create capabilities from dictionary format.
+
+        Args:
+            data: Dictionary with capability flags
+
+        Returns:
+            ProviderCapabilities instance
+
+        Example:
+            caps = ProviderCapabilities.from_dict({
+                "supports_hooks": True,
+                "supports_sandbox": False,
+            })
+        """
+        return cls(
+            supports_hooks=data.get("supports_hooks", False),
+            supports_sandbox=data.get("supports_sandbox", False),
+            supports_streaming=data.get("supports_streaming", True),
+            supports_mcp=data.get("supports_mcp", False),
+            supports_extended_thinking=data.get("supports_extended_thinking", False),
+        )
+
+    @property
+    def requires_pre_validation(self) -> bool:
+        """
+        Check if provider requires pre-execution command validation.
+
+        Providers without hook support (like OpenCode) require commands
+        to be validated before execution, since they cannot use post-hooks
+        to catch and block dangerous operations.
+
+        Returns:
+            True if pre-execution validation is required
+
+        Example:
+            if provider.capabilities.requires_pre_validation:
+                validate_command_before_execution(command)
+        """
+        return not self.supports_hooks
+
+    @property
+    def has_full_security(self) -> bool:
+        """
+        Check if provider has full security features.
+
+        Full security includes both hooks for runtime validation
+        and sandbox for isolated execution.
+
+        Returns:
+            True if provider supports both hooks and sandbox
+        """
+        return self.supports_hooks and self.supports_sandbox
+
+    def get_unsupported_features(self) -> list[str]:
+        """
+        Get list of features not supported by this provider.
+
+        Useful for logging, debugging, and user communication about
+        provider limitations.
+
+        Returns:
+            List of unsupported feature names
+
+        Example:
+            unsupported = provider.capabilities.get_unsupported_features()
+            if unsupported:
+                print(f"Note: This provider does not support: {', '.join(unsupported)}")
+        """
+        unsupported = []
+        if not self.supports_hooks:
+            unsupported.append("hooks")
+        if not self.supports_sandbox:
+            unsupported.append("sandbox")
+        if not self.supports_streaming:
+            unsupported.append("streaming")
+        if not self.supports_mcp:
+            unsupported.append("mcp")
+        if not self.supports_extended_thinking:
+            unsupported.append("extended_thinking")
+        return unsupported
+
+    def get_supported_features(self) -> list[str]:
+        """
+        Get list of features supported by this provider.
+
+        Useful for logging and debugging provider capabilities.
+
+        Returns:
+            List of supported feature names
+        """
+        supported = []
+        if self.supports_hooks:
+            supported.append("hooks")
+        if self.supports_sandbox:
+            supported.append("sandbox")
+        if self.supports_streaming:
+            supported.append("streaming")
+        if self.supports_mcp:
+            supported.append("mcp")
+        if self.supports_extended_thinking:
+            supported.append("extended_thinking")
+        return supported
+
 
 @dataclass
 class ConversationContext:
