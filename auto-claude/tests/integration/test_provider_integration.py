@@ -501,12 +501,15 @@ class TestProviderStatus:
         self, temp_project_dir: Path, temp_global_settings: Path
     ) -> None:
         """Status should reflect default configuration."""
-        with patch.object(
-            _provider_info,
-            "get_global_settings_path",
-            return_value=temp_global_settings,
-        ):
-            status = get_provider_status(temp_project_dir)
+        # Clear any existing OAuth token from the environment to test default state
+        env_patch = {"CLAUDE_CODE_OAUTH_TOKEN": ""}
+        with patch.dict(os.environ, env_patch, clear=False):
+            with patch.object(
+                _provider_info,
+                "get_global_settings_path",
+                return_value=temp_global_settings,
+            ):
+                status = get_provider_status(temp_project_dir)
 
         assert status["provider"] == "claude_code"
         assert status["source"] == "default"
