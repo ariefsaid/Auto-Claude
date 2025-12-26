@@ -7,9 +7,10 @@ memory updates, recovery tracking, and Linear integration.
 """
 
 import logging
+from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any, Protocol, runtime_checkable
 
-from claude_agent_sdk import ClaudeSDKClient
 from debug import debug, debug_detailed, debug_error, debug_section, debug_success
 from insight_extractor import extract_session_insights
 from linear_updater import (
@@ -43,6 +44,28 @@ from .utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class AgentClient(Protocol):
+    """
+    Protocol defining the interface for agent clients.
+
+    This protocol allows both ClaudeSDKClient (official Claude Code SDK)
+    and future OpenCode clients to work with the same session management.
+
+    Any client implementing this protocol must provide:
+    - query(message): Send a message/prompt to the agent
+    - receive_response(): Async iterator yielding response messages
+    """
+
+    async def query(self, message: str) -> None:
+        """Send a query/prompt to the agent."""
+        ...
+
+    def receive_response(self) -> AsyncIterator[Any]:
+        """Receive responses from the agent as an async iterator."""
+        ...
 
 
 async def post_session_processing(
@@ -311,17 +334,20 @@ async def post_session_processing(
 
 
 async def run_agent_session(
-    client: ClaudeSDKClient,
+    client: AgentClient,
     message: str,
     spec_dir: Path,
     verbose: bool = False,
     phase: LogPhase = LogPhase.CODING,
 ) -> tuple[str, str]:
     """
-    Run a single agent session using Claude Agent SDK.
+    Run a single agent session using an AgentClient.
+
+    This function works with any client implementing the AgentClient protocol,
+    allowing both Claude Code SDK and OpenCode providers to be used.
 
     Args:
-        client: Claude SDK client
+        client: Agent client implementing AgentClient protocol
         message: The prompt to send
         spec_dir: Spec directory path
         verbose: Whether to show detailed output
