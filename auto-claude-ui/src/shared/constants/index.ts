@@ -29,3 +29,6 @@ export * from './github';
 
 // Configuration and paths
 export * from './config';
+
+// Provider constants (multi-provider support)
+export * from './providers';
