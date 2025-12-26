@@ -158,6 +158,7 @@ class SubprocessConfig:
         working_dir: Working directory for the subprocess
         timeout: Default timeout for operations in seconds
         env: Additional environment variables
+        _current_query: Internal field to store the current query (for command building)
     """
 
     provider: str
@@ -166,24 +167,35 @@ class SubprocessConfig:
     working_dir: Path | None = None
     timeout: float = 300.0  # 5 minutes default
     env: dict[str, str] = field(default_factory=dict)
+    _current_query: str | None = field(default=None, init=False, repr=False)
 
     def get_command_args(self) -> list[str]:
         """
         Get command-line arguments for OpenCode CLI.
 
+        OpenCode CLI format: opencode run [message] --model provider/model --format json
+
         Returns:
             List of command-line arguments
         """
-        args = ["build", "--non-interactive"]
+        args = ["run"]  # Use 'run' command, not 'build'
 
-        if self.provider:
-            args.extend(["--provider", self.provider])
+        # Add query message as positional argument (if provided)
+        if self._current_query:
+            args.append(self._current_query)
 
-        if self.model:
+        # Model format: provider/model (e.g., "zai-coding-plan/glm-4.7")
+        if self.provider and self.model:
+            model_spec = f"{self.provider}/{self.model}"
+            args.extend(["--model", model_spec])
+        elif self.model:
+            # If model already includes provider (e.g., "zai-coding-plan/glm-4.7")
             args.extend(["--model", self.model])
 
+        # Request JSON output for parsing
+        args.extend(["--format", "json"])
+
         # Note: API key is passed via environment variable for security
-        # Not as command-line argument
 
         return args
 
@@ -210,10 +222,12 @@ class SubprocessConfig:
                 "groq": "GROQ_API_KEY",
                 "azure": "AZURE_API_KEY",
                 "zai": "ZAI_API_KEY",
+                "zai-coding-plan": "ZAI_API_KEY",  # Z.ai coding plan uses same env var
                 "openrouter": "OPENROUTER_API_KEY",
+                "opencode": "OPENAI_API_KEY",  # OpenCode default uses OpenAI
             }
             env_var = provider_env_vars.get(
-                self.provider, f"{self.provider.upper()}_API_KEY"
+                self.provider, f"{self.provider.upper().replace('-', '_')}_API_KEY"
             )
             env[env_var] = self.api_key
 
@@ -456,32 +470,25 @@ class OpenCodeSubprocess:
         """
         Send a query to the OpenCode subprocess.
 
+        For OpenCode CLI, the message must be passed as a positional argument
+        when starting the process, not via stdin. This method restarts the
+        process with the query included in the command.
+
         Args:
             query: The query text to send
 
         Raises:
-            OpenCodeSubprocessError: If subprocess is not running
+            OpenCodeSubprocessError: If subprocess fails to start
         """
-        if not self.is_running:
-            raise OpenCodeSubprocessError("Cannot send query: subprocess not running")
+        # Stop existing process if running
+        if self.is_running:
+            await self.stop()
 
-        if not self._process or not self._process.stdin:
-            raise OpenCodeSubprocessError("Cannot send query: stdin not available")
+        # Store query in config for get_command_args to use
+        self.config._current_query = query  # type: ignore
 
-        try:
-            # Send query as JSON-encoded line
-            import json
-
-            query_json = json.dumps({"query": query, "type": "query"})
-            self._process.stdin.write((query_json + "\n").encode())
-            await self._process.stdin.drain()
-        except BrokenPipeError as e:
-            # Subprocess may have crashed
-            await self._capture_stderr()
-            raise OpenCodeSubprocessError(
-                "Subprocess pipe broken - process may have crashed",
-                stderr=self._stderr_buffer,
-            ) from e
+        # Start subprocess with query in command args
+        await self.start()
 
     async def read_output(self, timeout: float | None = None) -> str:
         """

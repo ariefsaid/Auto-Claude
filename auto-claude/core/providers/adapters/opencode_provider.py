@@ -273,9 +273,18 @@ class OpenCodeProvider:
             # Parse output to messages
             messages = self.parser.parse_output(output)
 
-            # Return last assistant message or empty response
+            # Return last assistant message with content, or empty response
             for msg in reversed(messages):
-                if msg.role == "assistant":
+                if msg.role == "assistant" and msg.content:
+                    # Skip messages with empty content (like step markers)
+                    has_content = any(
+                        (hasattr(block, "text") and block.text)
+                        or hasattr(block, "name")  # Tool use has content
+                        for block in msg.content
+                    )
+                    if not has_content:
+                        continue
+
                     # Validate tool calls for security before returning
                     blocked = self._validate_message(msg)
                     if blocked:

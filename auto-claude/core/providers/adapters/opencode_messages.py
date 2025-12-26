@@ -116,11 +116,16 @@ class OpenCodeMessageParser:
             OpenCodeParseError: If the message format is invalid
         """
         # Validate message type
+        # OpenCode uses types like: "text", "step_start", "step_finish", "tool_use", etc.
+        # We accept all types and extract content from them
         msg_type = data.get("type", "message")
-        if msg_type not in ("message", "response", "assistant", "user"):
-            raise OpenCodeParseError(
-                f"Unsupported message type: {msg_type!r}", raw_data=data
-            )
+
+        # Skip non-content events (step markers, metadata)
+        skip_types = ("step_start", "step-start", "step_finish", "step-finish")
+        if msg_type in skip_types:
+            # These are metadata events, not actual messages
+            # Return empty message which will be filtered out
+            return UniversalMessage(role="assistant", content=[])
 
         # Extract role
         role = self._extract_role(data)
@@ -166,6 +171,14 @@ class OpenCodeMessageParser:
         if msg_type in ("message", "response"):
             return "assistant"
 
+        # OpenCode content messages (text, tool_use, etc.) are from assistant
+        if msg_type in ("text", "tool_use", "tool-use", "tool_result", "tool-result"):
+            return "assistant"
+
+        # If we have content but no role, assume assistant (AI response)
+        if data.get("content") or data.get("text") or data.get("part", {}).get("text"):
+            return "assistant"
+
         raise OpenCodeParseError(
             f"Cannot determine message role from data: {data!r}", raw_data=data
         )
@@ -181,6 +194,16 @@ class OpenCodeMessageParser:
             List of content blocks
         """
         content_blocks: list[ContentBlock] = []
+
+        # OpenCode wraps content in "part" field - extract it first
+        if "part" in data and isinstance(data["part"], dict):
+            part_data = data["part"]
+            # Check for text in the part object
+            if "text" in part_data and part_data["text"]:
+                content_blocks.append(TextContent(text=part_data["text"]))
+                return content_blocks
+            # Otherwise continue parsing with part_data
+            data = part_data
 
         # Get content from various possible locations
         content = data.get("content")
@@ -205,7 +228,7 @@ class OpenCodeMessageParser:
             return content_blocks
 
         # Handle case where entire data is the content (simplified format)
-        if "text" in data:
+        if "text" in data and data["text"]:
             content_blocks.append(TextContent(text=data["text"]))
 
         if "tool_use" in data or "tool_call" in data:
