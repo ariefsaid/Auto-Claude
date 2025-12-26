@@ -10,12 +10,14 @@ This module provides:
 - Subprocess-based communication with OpenCode
 - Message parsing via OpenCodeMessageParser
 - Streaming response support
+- Integrated security validation for bash commands
 
 The OpenCodeProvider manages:
 - OpenCode CLI subprocess lifecycle
 - JSON message serialization/deserialization
 - Streaming output parsing
 - Timeout and error handling
+- Pre-execution security validation for bash commands
 
 Note on capabilities:
 OpenCode does NOT support the same features as Claude Code:
@@ -25,21 +27,26 @@ OpenCode does NOT support the same features as Claude Code:
 - No MCP (OpenCode has its own tool integration)
 - No extended thinking
 
+Security Integration:
+Because OpenCode lacks hook support, security validation happens BEFORE
+commands are sent to the subprocess. The same security profile from
+.auto-claude-security.json applies to both Claude Code and OpenCode.
+
 Usage:
     from auto_claude.core.providers.adapters.opencode_provider import OpenCodeProvider
     from auto_claude.core.providers.adapters.opencode_subprocess import SubprocessConfig
 
-    # Create provider from configuration
+    # Create provider from configuration with security enabled
     config = SubprocessConfig(
         provider="openai",
         model="gpt-4o",
         api_key="sk-...",
     )
-    provider = OpenCodeProvider.from_config(config)
+    provider = OpenCodeProvider.from_config(config, enable_security=True)
 
     # Use as async context manager
     async with provider as client:
-        # Send a query
+        # Send a query - bash commands will be validated before execution
         response = await client.query(universal_message)
 
         # Or stream responses
@@ -57,9 +64,15 @@ from ..client import (
     ProviderCapabilities,
     ProviderConnectionError,
     ProviderError,
+    SecurityBlockedError,
 )
-from ..messages import TextContent, UniversalMessage
+from ..messages import TextContent, ToolUseContent, UniversalMessage
 from .opencode_messages import OpenCodeMessageParser, OpenCodeParseError
+from .opencode_security import (
+    OpenCodeSecurityValidator,
+    ValidationResult,
+    create_security_wrapper,
+)
 from .opencode_subprocess import (
     OpenCodeCrashError,
     OpenCodeNotInstalledError,
@@ -76,7 +89,7 @@ class OpenCodeProvider:
     AgentClient implementation wrapping OpenCodeSubprocess.
 
     Provides a provider-agnostic interface to OpenCode CLI while managing
-    subprocess lifecycle and message conversion.
+    subprocess lifecycle, message conversion, and security validation.
 
     Unlike ClaudeProvider, OpenCodeProvider:
     - Communicates via CLI subprocess (stdin/stdout)
@@ -84,19 +97,22 @@ class OpenCodeProvider:
     - Does NOT support sandboxing directly
     - Does NOT support MCP (uses OpenCode's built-in tools)
     - Does NOT support extended thinking
+    - Includes optional pre-execution security validation for bash commands
 
     The provider uses OpenCodeMessageParser for parsing CLI JSON output
-    to UniversalMessage format.
+    to UniversalMessage format, and OpenCodeSecurityValidator for
+    pre-execution command validation.
 
     Attributes:
         subprocess: The underlying OpenCodeSubprocess manager
         parser: Message parser for JSON output conversion
+        security_validator: Optional security validator for bash commands
         _is_connected: Connection state tracking
         _conversation_context: Current conversation state
 
     Example:
         config = SubprocessConfig(provider="openai", model="gpt-4o")
-        provider = OpenCodeProvider.from_config(config)
+        provider = OpenCodeProvider.from_config(config, enable_security=True)
 
         async with provider:
             response = await provider.query(message)
@@ -105,6 +121,7 @@ class OpenCodeProvider:
 
     subprocess: OpenCodeSubprocess
     parser: OpenCodeMessageParser = field(default_factory=OpenCodeMessageParser)
+    security_validator: OpenCodeSecurityValidator | None = None
     _is_connected: bool = field(default=False, init=False)
     _conversation_context: ConversationContext = field(
         default_factory=ConversationContext, init=False
@@ -153,6 +170,66 @@ class OpenCodeProvider:
         """
         return self._is_connected and self.subprocess.is_running
 
+    @property
+    def is_security_enabled(self) -> bool:
+        """
+        Check if security validation is enabled for this provider.
+
+        Returns:
+            True if a security validator is configured
+        """
+        return self.security_validator is not None
+
+    def _validate_message(self, message: UniversalMessage) -> ValidationResult | None:
+        """
+        Validate tool calls in a message for security.
+
+        Checks all ToolUseContent blocks in the message for Bash commands
+        and validates them against the security profile.
+
+        Args:
+            message: The message containing potential tool calls
+
+        Returns:
+            ValidationResult if a command was blocked, None if all allowed
+
+        Note:
+            Only validates if security_validator is configured.
+            Non-Bash tool calls pass through without validation.
+        """
+        if not self.is_security_enabled:
+            return None
+
+        # Check all tool use blocks in the message
+        for block in message.content:
+            if isinstance(block, ToolUseContent):
+                result = self.security_validator.validate_tool_call(
+                    tool_name=block.name,
+                    tool_input=block.input,
+                )
+                if result.is_blocked:
+                    return result
+
+        return None
+
+    def _raise_if_blocked(self, result: ValidationResult) -> None:
+        """
+        Raise SecurityBlockedError if validation result indicates blocked.
+
+        Args:
+            result: ValidationResult from security validation
+
+        Raises:
+            SecurityBlockedError: If the result indicates command was blocked
+        """
+        if result.is_blocked:
+            raise SecurityBlockedError(
+                provider=self.provider_name,
+                command=result.command,
+                reason=result.reason,
+                tool_name=result.tool_name,
+            )
+
     async def query(
         self,
         message: UniversalMessage,
@@ -162,7 +239,8 @@ class OpenCodeProvider:
         Send a query and get a complete response.
 
         Extracts text content from UniversalMessage, sends to subprocess,
-        and parses the complete response.
+        and parses the complete response. Validates any bash tool calls
+        against the security profile before returning.
 
         Args:
             message: The query message in universal format
@@ -174,6 +252,7 @@ class OpenCodeProvider:
         Raises:
             ProviderConnectionError: If not connected to the provider
             ProviderError: If the provider returns an error
+            SecurityBlockedError: If a bash command is blocked by security
         """
         if not self.is_connected:
             raise ProviderConnectionError(
@@ -197,6 +276,11 @@ class OpenCodeProvider:
             # Return last assistant message or empty response
             for msg in reversed(messages):
                 if msg.role == "assistant":
+                    # Validate tool calls for security before returning
+                    blocked = self._validate_message(msg)
+                    if blocked:
+                        self._raise_if_blocked(blocked)
+
                     # Add to conversation context
                     if context:
                         context.add_message(message)
@@ -257,7 +341,8 @@ class OpenCodeProvider:
         Send a query and stream response chunks.
 
         Extracts text content from UniversalMessage, sends to subprocess,
-        and streams parsed response messages as they arrive.
+        and streams parsed response messages as they arrive. Validates
+        each message for bash tool calls against the security profile.
 
         Args:
             message: The query message in universal format
@@ -269,6 +354,7 @@ class OpenCodeProvider:
         Raises:
             ProviderConnectionError: If not connected to the provider
             ProviderError: If the provider returns an error
+            SecurityBlockedError: If a bash command is blocked by security
         """
         if not self.is_connected:
             raise ProviderConnectionError(
@@ -291,6 +377,11 @@ class OpenCodeProvider:
                 # Parse each line as potential message
                 parsed_msg = self.parser.parse_streaming_line(line)
                 if parsed_msg and parsed_msg.role == "assistant":
+                    # Validate tool calls for security before yielding
+                    blocked = self._validate_message(parsed_msg)
+                    if blocked:
+                        self._raise_if_blocked(blocked)
+
                     last_message = parsed_msg
                     yield parsed_msg
 
@@ -442,6 +533,8 @@ class OpenCodeProvider:
     def from_subprocess(
         cls,
         subprocess: OpenCodeSubprocess,
+        enable_security: bool = False,
+        project_dir: Path | None = None,
     ) -> "OpenCodeProvider":
         """
         Create an OpenCodeProvider from an existing OpenCodeSubprocess.
@@ -451,19 +544,31 @@ class OpenCodeProvider:
 
         Args:
             subprocess: A configured OpenCodeSubprocess instance
+            enable_security: Whether to enable security validation for bash commands
+            project_dir: Project directory for security profile. Uses subprocess
+                         working_dir or cwd if not provided.
 
         Returns:
-            OpenCodeProvider wrapping the subprocess
+            OpenCodeProvider wrapping the subprocess with optional security
         """
+        security_validator = None
+        if enable_security:
+            # Use project_dir, or fall back to subprocess working dir, or cwd
+            sec_dir = project_dir or subprocess.config.working_dir or Path.cwd()
+            security_validator = create_security_wrapper(sec_dir)
+
         return cls(
             subprocess=subprocess,
             parser=OpenCodeMessageParser(),
+            security_validator=security_validator,
         )
 
     @classmethod
     def from_config(
         cls,
         config: SubprocessConfig,
+        enable_security: bool = False,
+        project_dir: Path | None = None,
     ) -> "OpenCodeProvider":
         """
         Create an OpenCodeProvider from SubprocessConfig.
@@ -473,9 +578,12 @@ class OpenCodeProvider:
 
         Args:
             config: Subprocess configuration with provider, model, etc.
+            enable_security: Whether to enable security validation for bash commands
+            project_dir: Project directory for security profile. Uses config
+                         working_dir or cwd if not provided.
 
         Returns:
-            OpenCodeProvider ready for use
+            OpenCodeProvider ready for use with optional security
 
         Example:
             config = SubprocessConfig(
@@ -483,15 +591,16 @@ class OpenCodeProvider:
                 model="gpt-4o",
                 api_key="sk-...",
             )
-            provider = OpenCodeProvider.from_config(config)
+            provider = OpenCodeProvider.from_config(config, enable_security=True)
 
             async with provider:
                 response = await provider.query(message)
         """
         subprocess = OpenCodeSubprocess(config=config)
-        return cls(
+        return cls.from_subprocess(
             subprocess=subprocess,
-            parser=OpenCodeMessageParser(),
+            enable_security=enable_security,
+            project_dir=project_dir or config.working_dir,
         )
 
     @classmethod
@@ -502,6 +611,7 @@ class OpenCodeProvider:
         api_key: str | None = None,
         working_dir: Path | None = None,
         timeout: float = 300.0,
+        enable_security: bool = False,
     ) -> "OpenCodeProvider":
         """
         Create an OpenCodeProvider from individual parameters.
@@ -515,14 +625,16 @@ class OpenCodeProvider:
             api_key: API key for the provider (optional, can use env var)
             working_dir: Working directory for the subprocess
             timeout: Default timeout for operations in seconds
+            enable_security: Whether to enable security validation for bash commands
 
         Returns:
-            OpenCodeProvider ready for use
+            OpenCodeProvider ready for use with optional security
 
         Example:
             provider = OpenCodeProvider.from_parameters(
                 provider="openai",
                 model="gpt-4o",
+                enable_security=True,
             )
 
             async with provider:
@@ -535,7 +647,7 @@ class OpenCodeProvider:
             working_dir=working_dir,
             timeout=timeout,
         )
-        return cls.from_config(config)
+        return cls.from_config(config, enable_security=enable_security)
 
     def get_conversation_context(self) -> ConversationContext:
         """

@@ -754,8 +754,9 @@ class TestFactoryCreateClient:
                 model="test-model",
             )
 
-    def test_opencode_not_implemented_raises_error(self):
-        """OpenCode provider should raise error (not yet implemented)."""
+    def test_opencode_provider_creation(self):
+        """OpenCode provider should be created successfully."""
+        from core.providers.adapters.opencode_provider import OpenCodeProvider
         from core.providers.factory import create_client
 
         config = ProviderConfig(
@@ -767,16 +768,17 @@ class TestFactoryCreateClient:
             },
         )
 
-        with pytest.raises(ProviderError) as excinfo:
-            create_client(
-                config=config,
-                project_dir=Path("/test"),
-                spec_dir=Path("/test/spec"),
-                model="test-model",
-            )
+        # OpenCode provider should now be created successfully
+        provider = create_client(
+            config=config,
+            project_dir=Path("/test"),
+            spec_dir=Path("/test/spec"),
+            model="test-model",
+        )
 
-        # Should indicate OpenCode is not yet implemented
-        assert "opencode" in str(excinfo.value).lower()
+        # Verify it's an OpenCodeProvider
+        assert isinstance(provider, OpenCodeProvider)
+        assert provider.provider_name == "OpenCode"
 
 
 # =============================================================================

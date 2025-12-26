@@ -564,3 +564,40 @@ class ProviderTimeoutError(ProviderError):
             message,
             {"operation": operation, "timeout_seconds": timeout_seconds},
         )
+
+
+class SecurityBlockedError(ProviderError):
+    """
+    Exception raised when a command is blocked by security validation.
+
+    This is used by providers that require pre-execution validation
+    (like OpenCode) to signal that a bash command was blocked due to
+    security policy.
+
+    The error contains the blocked command and the reason for blocking.
+    """
+
+    def __init__(
+        self,
+        provider: str,
+        command: str,
+        reason: str,
+        tool_name: str | None = None,
+    ) -> None:
+        """
+        Initialize a SecurityBlockedError.
+
+        Args:
+            provider: Name of the provider
+            command: The command that was blocked
+            reason: Reason the command was blocked
+            tool_name: Optional tool name that contained the command
+        """
+        message = f"Security blocked: {reason}"
+        details = {
+            "command": command,
+            "reason": reason,
+        }
+        if tool_name:
+            details["tool_name"] = tool_name
+        super().__init__(provider, message, details)
