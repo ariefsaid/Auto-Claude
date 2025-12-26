@@ -428,3 +428,132 @@ class ProviderConfig:
             return f"{self.provider.value} (global settings, no credential)"
         else:
             return f"{self.provider.value} (project settings, no credential)"
+
+    def is_valid(self) -> bool:
+        """
+        Check if config has minimum required values for operation.
+
+        Returns True if:
+        - A valid agent provider is set
+        - For claude_code: claude-code credential exists and is valid
+        - For opencode: opencode_provider is set and has valid credential
+
+        Returns:
+            True if configuration is valid and ready for use
+        """
+        # Always need a valid provider
+        if not self.provider:
+            return False
+
+        if self.provider == AgentProvider.CLAUDE_CODE:
+            # Claude Code needs a valid credential
+            cred = self.get_credential("claude-code")
+            if not cred:
+                return False
+            return cred.is_valid()
+
+        elif self.provider == AgentProvider.OPENCODE:
+            # OpenCode needs an LLM provider and potentially a credential
+            if not self.opencode_provider:
+                return False
+            # Check if credential exists and is valid for the LLM provider
+            cred = self.get_credential(self.opencode_provider)
+            if cred:
+                return cred.is_valid()
+            # OpenCode can work without explicit credentials for some providers
+            # (e.g., using OPENAI_API_KEY directly from env)
+            return True
+
+        return False
+
+    def get_validation_errors(self) -> list[str]:
+        """
+        Get list of validation errors for current configuration.
+
+        Returns:
+            List of error messages (empty if valid)
+        """
+        errors = []
+
+        if not self.provider:
+            errors.append("Agent provider is required")
+            return errors
+
+        if self.provider == AgentProvider.CLAUDE_CODE:
+            cred = self.get_credential("claude-code")
+            if not cred:
+                errors.append(
+                    "Claude Code provider requires credentials. "
+                    "Set CLAUDE_CODE_OAUTH_TOKEN or add 'claude-code' to PROVIDER_CREDENTIALS"
+                )
+            elif not cred.is_valid():
+                errors.extend(cred.get_validation_errors())
+
+        elif self.provider == AgentProvider.OPENCODE:
+            if not self.opencode_provider:
+                errors.append(
+                    "OpenCode provider requires OPENCODE_PROVIDER to be set "
+                    "(e.g., openai, anthropic, google)"
+                )
+            else:
+                cred = self.get_credential(self.opencode_provider)
+                if cred and not cred.is_valid():
+                    errors.extend(cred.get_validation_errors())
+
+            if not self.opencode_model:
+                # Model is optional but recommended
+                pass
+
+        else:
+            errors.append(f"Unknown agent provider: {self.provider}")
+
+        return errors
+
+    def get_credentials_summary(self) -> dict[str, Any]:
+        """
+        Get a summary of all configured credentials and their sources.
+
+        Returns:
+            Dictionary with credential information:
+                - active_provider: Current active provider
+                - is_global: Whether using global settings
+                - credentials: Dict of credential summaries (without sensitive data)
+        """
+        credential_summaries = {}
+        for provider_id, cred in self.credentials.items():
+            credential_summaries[provider_id] = {
+                "source": cred.get_source_info(),
+                "is_valid": cred.is_valid(),
+                "has_api_key": bool(cred.api_key),
+                "has_base_url": bool(cred.base_url),
+                "default_model": cred.default_model or None,
+                "is_global": cred.is_global,
+            }
+
+        return {
+            "active_provider": self.provider.value,
+            "is_global": self.is_global,
+            "opencode_provider": self.opencode_provider or None,
+            "opencode_model": self.opencode_model or None,
+            "credentials": credential_summaries,
+        }
+
+    def get_provider_status(self) -> dict[str, Any]:
+        """
+        Get the current provider status including validation state.
+
+        Returns:
+            Dict with status information:
+                - provider: Active provider value
+                - is_valid: Whether configuration is valid
+                - is_global: Whether using global settings
+                - credential_source: Source of active credential
+                - errors: List of validation errors (empty if valid)
+        """
+        return {
+            "provider": self.provider.value,
+            "is_valid": self.is_valid(),
+            "is_global": self.is_global,
+            "credential_source": self.get_credential_source_info(),
+            "errors": self.get_validation_errors(),
+        }
