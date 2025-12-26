@@ -10,6 +10,7 @@ import { detectRateLimit, createSDKRateLimitInfo, getProfileEnv, detectAuthFailu
 import { projectStore } from '../project-store';
 import { getClaudeProfileManager } from '../claude-profile-manager';
 import { findPythonCommand, parsePythonCommand } from '../python-detector';
+import { pythonEnvManager } from '../python-env-manager';
 
 /**
  * Process spawning and lifecycle management
@@ -194,8 +195,25 @@ export class AgentProcessManager {
     // Get active Claude profile environment (CLAUDE_CONFIG_DIR if not default)
     const profileEnv = getProfileEnv();
 
+    // Determine which Python to use:
+    // 1. If configured Python path is a venv path (contains '/python-venv/'), use it
+    // 2. If pythonEnvManager has a ready venv, prefer that
+    // 3. Otherwise use configured Python path
+    let pythonToUse = this.pythonPath;
+
+    // Check if we have a venv Python available from pythonEnvManager
+    if (pythonEnvManager.isEnvReady()) {
+      const venvPython = pythonEnvManager.getPythonPath();
+      if (venvPython) {
+        pythonToUse = venvPython;
+        console.warn('[AgentProcess] Using venv Python:', venvPython);
+      }
+    } else {
+      console.warn('[AgentProcess] Python venv not ready, using configured Python:', pythonToUse);
+    }
+
     // Parse Python command to handle space-separated commands like "py -3"
-    const [pythonCommand, pythonBaseArgs] = parsePythonCommand(this.pythonPath);
+    const [pythonCommand, pythonBaseArgs] = parsePythonCommand(pythonToUse);
     const childProcess = spawn(pythonCommand, [...pythonBaseArgs, ...args], {
       cwd,
       env: {
