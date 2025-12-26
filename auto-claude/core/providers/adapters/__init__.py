@@ -35,10 +35,10 @@ Usage:
         response = await provider.query(universal_msg)
 """
 
-# Adapters will be imported here as they are implemented in subsequent subtasks.
-# The following imports will be added:
-#
-# from .claude_adapter import ClaudeMessageAdapter
+# Claude adapters
+from .claude_adapter import ClaudeMessageAdapter
+
+# The following imports will be added as they are implemented in subsequent subtasks:
 # from .claude_provider import ClaudeProvider
 # from .opencode_provider import OpenCodeProvider
 # from .opencode_messages import parse_opencode_response
@@ -47,9 +47,9 @@ Usage:
 # from .opencode_security import validate_opencode_command
 
 __all__ = [
-    # Claude adapters (to be implemented)
-    # "ClaudeMessageAdapter",
-    # "ClaudeProvider",
+    # Claude adapters
+    "ClaudeMessageAdapter",
+    # ClaudeProvider (to be implemented)
     # OpenCode adapters (to be implemented)
     # "OpenCodeProvider",
     # "parse_opencode_response",
