@@ -3,11 +3,23 @@ Claude SDK Client Configuration
 ===============================
 
 Functions for creating and configuring the Claude Agent SDK client.
+
+This module provides:
+- create_client(): Original function for direct ClaudeSDKClient creation
+- create_client_from_config(): New function using ProviderConfig and provider factory
+
+The create_client() function is maintained for backward compatibility.
+Use create_client_from_config() for the new multi-provider abstraction layer.
 """
 
 import json
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.providers.client import AgentClient
+    from core.providers.config import ProviderConfig
 
 from auto_claude_tools import (
     create_auto_claude_mcp_server,
@@ -406,4 +418,83 @@ def create_client(
             env=sdk_env,  # Pass ANTHROPIC_BASE_URL etc. to subprocess
             max_thinking_tokens=max_thinking_tokens,  # Extended thinking budget
         )
+    )
+
+
+def create_client_from_config(
+    project_dir: Path,
+    spec_dir: Path,
+    model: str,
+    agent_type: str = "coder",
+    max_thinking_tokens: int | None = None,
+    config: "ProviderConfig | None" = None,
+) -> "AgentClient":
+    """
+    Create a provider client using the multi-provider abstraction layer.
+
+    This function provides access to the new multi-provider system while
+    maintaining backward compatibility. It uses ProviderConfig to determine
+    which provider to use (Claude Code, OpenCode, etc.) and creates the
+    appropriate client implementation.
+
+    For direct ClaudeSDKClient creation without the abstraction layer,
+    use create_client() instead.
+
+    Args:
+        project_dir: Root directory for the project (working directory)
+        spec_dir: Directory containing the spec (for settings file)
+        model: Model to use (provider-specific format)
+        agent_type: Type of agent - 'planner', 'coder', 'qa_reviewer', or 'qa_fixer'
+                   This determines which custom auto-claude tools are available.
+        max_thinking_tokens: Token budget for extended thinking (None = disabled)
+                            - ultrathink: 16000 (spec creation)
+                            - high: 10000 (QA review)
+                            - medium: 5000 (planning, validation)
+                            - None: disabled (coding)
+        config: Optional ProviderConfig. If not provided, loads from environment.
+
+    Returns:
+        AgentClient implementation for the configured provider
+
+    Raises:
+        ProviderNotFoundError: If the requested provider is not available
+        ProviderError: If client creation fails or configuration is invalid
+
+    Example:
+        # Use default configuration from environment
+        provider = create_client_from_config(
+            project_dir=Path("/project"),
+            spec_dir=Path("/project/.auto-claude/specs/001"),
+            model="claude-sonnet-4-20250514",
+        )
+
+        async with provider:
+            response = await provider.query(message)
+
+        # Or with explicit configuration
+        from core.providers.config import ProviderConfig
+        config = ProviderConfig.from_env()
+        provider = create_client_from_config(
+            project_dir=Path("/project"),
+            spec_dir=Path("/project/.auto-claude/specs/001"),
+            model="claude-sonnet-4-20250514",
+            config=config,
+        )
+    """
+    # Import here to avoid circular imports and allow optional usage
+    from core.providers.config import ProviderConfig as ProviderConfigClass
+    from core.providers.factory import create_client as factory_create_client
+
+    # Load config from environment if not provided
+    if config is None:
+        config = ProviderConfigClass.from_env()
+
+    # Use the factory to create the appropriate provider
+    return factory_create_client(
+        config=config,
+        project_dir=project_dir,
+        spec_dir=spec_dir,
+        model=model,
+        agent_type=agent_type,
+        max_thinking_tokens=max_thinking_tokens,
     )
