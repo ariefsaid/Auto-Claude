@@ -4,6 +4,7 @@
 
 import type { NotificationSettings } from './project';
 import type { ChangelogFormat, ChangelogAudience, ChangelogEmojiLevel } from './changelog';
+import type { AgentProviderType, ProviderCredential } from './provider';
 
 // Color theme types for multi-theme support
 export type ColorTheme = 'default' | 'dusk' | 'lime' | 'ocean' | 'retro' | 'neo' | 'forest';
@@ -92,6 +93,15 @@ export interface AppSettings {
   // Graphiti LLM provider settings
   graphitiLlmProvider?: 'openai' | 'anthropic' | 'google' | 'groq' | 'ollama';
   ollamaBaseUrl?: string;
+  // Multi-provider support settings
+  /** Default agent provider type for new projects (claude_code or opencode) */
+  globalDefaultProvider?: AgentProviderType;
+  /** Global provider credentials store - maps normalized provider IDs to full credentials */
+  providerCredentials?: Record<string, ProviderCredential>;
+  /** Default OpenCode LLM provider ID when using global credentials (e.g., 'openai', 'zai-glm') */
+  globalOpencodeProvider?: string;
+  /** Default OpenCode model when using global credentials (e.g., 'gpt-4o', 'glm-4.7') */
+  globalOpencodeModel?: string;
   // Onboarding wizard completion state
   onboardingCompleted?: boolean;
   // Selected agent profile for preset model/thinking configurations
