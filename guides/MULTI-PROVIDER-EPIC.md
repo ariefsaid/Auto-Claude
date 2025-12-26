@@ -951,10 +951,12 @@ client = create_client(config, project_dir, spec_dir, model)  # Returns AgentCli
 6. Add comprehensive error handling
 
 **Technical Details:**
-- OpenCode CLI: `opencode build --non-interactive --api-key=... --provider=... --model=...`
-- Output format: JSON-based message stream
-- Session storage: SQLite (`~/.opencode/sessions.db`)
+- ~~OpenCode CLI: `opencode build --non-interactive --api-key=... --provider=... --model=...`~~ ❌ INCORRECT
+- **ACTUAL**: `opencode run [message] --model provider/model --format json` ✅ VERIFIED
+- Output format: NDJSON with nested `part` objects
+- Session storage: SQLite (`~/.opencode/sessions.db`) - managed by OpenCode
 - Tools: Map Auto-Claude tools to OpenCode equivalents (Read → file_read, Write → file_write, etc.)
+- API Key: Passed via environment variables (ZAI_API_KEY, OPENAI_API_KEY, etc.)
 
 **Acceptance Criteria:**
 - ✅ `OpenCodeProvider` implements `AgentClient` Protocol
@@ -975,6 +977,34 @@ client = create_client(config, project_dir, spec_dir, model)  # Returns AgentCli
 - Mock OpenCode CLI for testing
 - Graceful degradation if CLI not installed
 - Clear error messages for setup issues
+
+**✅ IMPLEMENTATION COMPLETED - 2025-12-26**
+
+**Real-World Findings:**
+During implementation with actual OpenCode CLI (v1.0.203) and Z.ai GLM 4.7, we discovered:
+
+1. **CLI Command Format** (Fixed):
+   - Initial spec assumed: `opencode build --provider X --model Y`
+   - Actual format: `opencode run [message] --model provider/model --format json`
+   - Fix: Updated `opencode_subprocess.py` command builder
+
+2. **JSON Output Structure** (Fixed):
+   - OpenCode uses NDJSON with nested `part` objects
+   - Structure: `{"type":"text", "part":{"text":"content"}}`
+   - Event types: `step_start`, `text`, `step_finish` (not `message`, `response`)
+   - Fix: Updated `opencode_messages.py` parser to handle OpenCode event types
+
+3. **Message as Positional Argument** (Fixed):
+   - Messages must be passed as CLI argument, not via stdin
+   - Each query requires subprocess restart with new message
+   - Fix: Modified `send_query()` to restart process with message in args
+
+**Verification:**
+- ✅ Tested with real Z.ai API (glm-4.7 model)
+- ✅ Query: "What is 2+2?" → Response: "2 plus 2 equals 4."
+- ✅ Full end-to-end flow working
+- ✅ All 578 provider tests passing
+- ✅ Documentation: `WORKTREE_001_REAL_CLI_SUCCESS.md`
 
 ---
 
