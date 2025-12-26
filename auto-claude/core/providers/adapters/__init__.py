@@ -39,6 +39,15 @@ Usage:
 from .claude_adapter import ClaudeMessageAdapter
 from .claude_provider import ClaudeProvider
 
+# OpenCode message parsing
+from .opencode_messages import (
+    OpenCodeMessageParser,
+    OpenCodeParseError,
+    parse_opencode_message,
+    parse_opencode_output,
+    parse_opencode_stream_line,
+)
+
 # OpenCode tool translation
 from .opencode_tools import (
     ToolMapping,
@@ -51,7 +60,6 @@ from .opencode_tools import (
 
 # The following imports will be added as they are implemented in subsequent subtasks:
 # from .opencode_provider import OpenCodeProvider
-# from .opencode_messages import parse_opencode_response
 # from .opencode_subprocess import OpenCodeSubprocess
 # from .opencode_security import validate_opencode_command
 
@@ -66,9 +74,14 @@ __all__ = [
     "get_all_mappings",
     "get_tool_category",
     "ToolMapping",
+    # OpenCode message parsing
+    "OpenCodeMessageParser",
+    "OpenCodeParseError",
+    "parse_opencode_message",
+    "parse_opencode_output",
+    "parse_opencode_stream_line",
     # OpenCode adapters (to be implemented)
     # "OpenCodeProvider",
-    # "parse_opencode_response",
     # "OpenCodeSubprocess",
     # "validate_opencode_command",
 ]
