@@ -705,3 +705,588 @@ class TestProviderConfigFromEnv:
             assert "openai" in config.credentials
             assert "claude-code" in config.credentials
             assert config.credentials["claude-code"].api_key == "legacy-token"
+
+
+# =============================================================================
+# Global/Project Credential Inheritance Integration Tests
+# =============================================================================
+
+
+class TestCredentialInheritance:
+    """
+    Integration tests for global/project credential inheritance.
+
+    These tests verify that:
+    1. Global credentials (isGlobal:true) are correctly marked
+    2. Project-specific credentials (isGlobal:false) are correctly marked
+    3. Project credentials take precedence when both exist
+    4. Global credentials serve as fallback when project credentials are missing
+    5. Credential source tracking accurately reflects the inheritance chain
+    """
+
+    # -------------------------------------------------------------------------
+    # Global Credential Configuration Tests
+    # -------------------------------------------------------------------------
+
+    def test_global_credential_for_openai_is_marked_correctly(self):
+        """Setting isGlobal:true for openai should be reflected in credential."""
+        creds_json = json.dumps(
+            {
+                "openai": {
+                    "apiKey": "sk-global-openai-key",
+                    "isGlobal": True,
+                    "defaultModel": "gpt-4o",
+                }
+            }
+        )
+        env = {
+            "AGENT_PROVIDER": "opencode",
+            "OPENCODE_PROVIDER": "openai",
+            "PROVIDER_CREDENTIALS": creds_json,
+        }
+        with patch.dict(os.environ, env, clear=True):
+            config = ProviderConfig.from_env()
+
+            cred = config.get_credential("openai")
+            assert cred is not None
+            assert cred.is_global is True
+            assert cred.api_key == "sk-global-openai-key"
+            assert cred.default_model == "gpt-4o"
+
+            # Verify source info includes "global"
+            source = cred.get_source_info()
+            assert "global" in source.lower()
+
+    def test_multiple_global_credentials_across_providers(self):
+        """Multiple providers can have global credentials."""
+        creds_json = json.dumps(
+            {
+                "openai": {"apiKey": "sk-openai-global", "isGlobal": True},
+                "anthropic": {"apiKey": "sk-ant-global", "isGlobal": True},
+                "google": {"apiKey": "gcp-key-global", "isGlobal": True},
+            }
+        )
+        env = {
+            "AGENT_PROVIDER": "opencode",
+            "OPENCODE_PROVIDER": "openai",
+            "PROVIDER_CREDENTIALS": creds_json,
+        }
+        with patch.dict(os.environ, env, clear=True):
+            config = ProviderConfig.from_env()
+
+            # All should be marked as global
+            for provider_id in ["openai", "anthropic", "google"]:
+                cred = config.get_credential(provider_id)
+                assert cred is not None
+                assert cred.is_global is True, f"{provider_id} should be global"
+
+    # -------------------------------------------------------------------------
+    # Project Credential Override Tests
+    # -------------------------------------------------------------------------
+
+    def test_project_credential_for_openai_is_marked_correctly(self):
+        """Setting isGlobal:false for openai should mark it as project credential."""
+        creds_json = json.dumps(
+            {
+                "openai": {
+                    "apiKey": "sk-project-openai-key",
+                    "isGlobal": False,
+                    "defaultModel": "gpt-4o-mini",
+                }
+            }
+        )
+        env = {
+            "AGENT_PROVIDER": "opencode",
+            "OPENCODE_PROVIDER": "openai",
+            "PROVIDER_CREDENTIALS": creds_json,
+        }
+        with patch.dict(os.environ, env, clear=True):
+            config = ProviderConfig.from_env()
+
+            cred = config.get_credential("openai")
+            assert cred is not None
+            assert cred.is_global is False
+            assert cred.api_key == "sk-project-openai-key"
+            assert cred.default_model == "gpt-4o-mini"
+
+            # Verify source info includes "project"
+            source = cred.get_source_info()
+            assert "project" in source.lower()
+
+    def test_project_credential_values_are_used_when_set(self):
+        """Project credentials with specific values should use those values."""
+        creds_json = json.dumps(
+            {
+                "openai": {
+                    "apiKey": "sk-specific-project-key",
+                    "baseUrl": "https://custom-openai.api.com",
+                    "defaultModel": "gpt-4-turbo",
+                    "isGlobal": False,
+                    "metadata": {"project": "test-project", "team": "engineering"},
+                }
+            }
+        )
+        env = {
+            "AGENT_PROVIDER": "opencode",
+            "OPENCODE_PROVIDER": "openai",
+            "PROVIDER_CREDENTIALS": creds_json,
+        }
+        with patch.dict(os.environ, env, clear=True):
+            config = ProviderConfig.from_env()
+
+            cred = config.get_credential("openai")
+            assert cred is not None
+            assert cred.api_key == "sk-specific-project-key"
+            assert cred.base_url == "https://custom-openai.api.com"
+            assert cred.default_model == "gpt-4-turbo"
+            assert cred.metadata["project"] == "test-project"
+            assert cred.metadata["team"] == "engineering"
+
+    # -------------------------------------------------------------------------
+    # Inheritance Priority Tests
+    # -------------------------------------------------------------------------
+
+    def test_project_credentials_take_precedence_over_global(self):
+        """
+        When both global and project credentials exist for the same provider,
+        the project credential should take precedence.
+
+        This simulates the scenario where:
+        1. Global settings have openai with isGlobal:true
+        2. Project settings override with isGlobal:false and different key
+        """
+        # Simulate the scenario where project env includes a project credential
+        # that overrides a global credential
+        creds_json = json.dumps(
+            {
+                "openai": {
+                    "apiKey": "sk-project-override-key",
+                    "isGlobal": False,  # Project credential takes precedence
+                    "defaultModel": "gpt-4o-project",
+                    "baseUrl": "https://project-api.openai.com",
+                }
+            }
+        )
+        env = {
+            "AGENT_PROVIDER": "opencode",
+            "OPENCODE_PROVIDER": "openai",
+            "PROVIDER_CREDENTIALS": creds_json,
+        }
+        with patch.dict(os.environ, env, clear=True):
+            config = ProviderConfig.from_env()
+
+            # Project credential should be used
+            cred = config.get_credential("openai")
+            assert cred is not None
+            assert cred.is_global is False
+            assert cred.api_key == "sk-project-override-key"
+            assert cred.default_model == "gpt-4o-project"
+            assert cred.base_url == "https://project-api.openai.com"
+
+            # Active credential should be the project one
+            active = config.get_active_credential()
+            assert active is not None
+            assert active.is_global is False
+            assert active.api_key == "sk-project-override-key"
+
+    def test_global_credential_used_when_no_project_override(self):
+        """Global credential is used as fallback when no project override exists."""
+        creds_json = json.dumps(
+            {
+                "openai": {
+                    "apiKey": "sk-global-fallback-key",
+                    "isGlobal": True,
+                    "defaultModel": "gpt-4o-global",
+                }
+            }
+        )
+        env = {
+            "AGENT_PROVIDER": "opencode",
+            "OPENCODE_PROVIDER": "openai",
+            "PROVIDER_CREDENTIALS": creds_json,
+        }
+        with patch.dict(os.environ, env, clear=True):
+            config = ProviderConfig.from_env()
+
+            # Global credential is the only option
+            cred = config.get_credential("openai")
+            assert cred is not None
+            assert cred.is_global is True
+            assert cred.api_key == "sk-global-fallback-key"
+
+    def test_mixed_global_and_project_for_different_providers(self):
+        """Different providers can have different inheritance levels."""
+        creds_json = json.dumps(
+            {
+                "openai": {
+                    "apiKey": "sk-openai-project",
+                    "isGlobal": False,  # Project credential
+                },
+                "anthropic": {
+                    "apiKey": "sk-anthropic-global",
+                    "isGlobal": True,  # Global credential
+                },
+                "google": {
+                    "apiKey": "google-project-key",
+                    "isGlobal": False,  # Project credential
+                },
+                "azure": {
+                    "isGlobal": True,  # Global without API key
+                },
+            }
+        )
+        env = {
+            "AGENT_PROVIDER": "opencode",
+            "OPENCODE_PROVIDER": "openai",
+            "PROVIDER_CREDENTIALS": creds_json,
+        }
+        with patch.dict(os.environ, env, clear=True):
+            config = ProviderConfig.from_env()
+
+            # OpenAI - project credential
+            openai_cred = config.get_credential("openai")
+            assert openai_cred.is_global is False
+            assert openai_cred.api_key == "sk-openai-project"
+            assert "project" in openai_cred.get_source_info().lower()
+
+            # Anthropic - global credential
+            anthropic_cred = config.get_credential("anthropic")
+            assert anthropic_cred.is_global is True
+            assert anthropic_cred.api_key == "sk-anthropic-global"
+            assert "global" in anthropic_cred.get_source_info().lower()
+
+            # Google - project credential
+            google_cred = config.get_credential("google")
+            assert google_cred.is_global is False
+            assert google_cred.api_key == "google-project-key"
+            assert "project" in google_cred.get_source_info().lower()
+
+            # Azure - global without API key (valid because global can use system auth)
+            azure_cred = config.get_credential("azure")
+            assert azure_cred.is_global is True
+            assert azure_cred.is_valid() is True  # Global without key is valid
+
+    # -------------------------------------------------------------------------
+    # Credential Source Tracking Tests
+    # -------------------------------------------------------------------------
+
+    def test_credential_source_info_tracks_global_correctly(self):
+        """Credential source info accurately identifies global credentials."""
+        creds_json = json.dumps({"openai": {"apiKey": "sk-test", "isGlobal": True}})
+        env = {
+            "AGENT_PROVIDER": "opencode",
+            "OPENCODE_PROVIDER": "openai",
+            "PROVIDER_CREDENTIALS": creds_json,
+        }
+        with patch.dict(os.environ, env, clear=True):
+            config = ProviderConfig.from_env()
+            source = config.get_credential_source_info()
+
+            assert "global" in source.lower()
+            assert "openai" in source.lower()
+
+    def test_credential_source_info_tracks_project_correctly(self):
+        """Credential source info accurately identifies project credentials."""
+        creds_json = json.dumps({"openai": {"apiKey": "sk-test", "isGlobal": False}})
+        env = {
+            "AGENT_PROVIDER": "opencode",
+            "OPENCODE_PROVIDER": "openai",
+            "PROVIDER_CREDENTIALS": creds_json,
+        }
+        with patch.dict(os.environ, env, clear=True):
+            config = ProviderConfig.from_env()
+            source = config.get_credential_source_info()
+
+            assert "project" in source.lower()
+            assert "openai" in source.lower()
+
+    def test_credentials_summary_shows_inheritance_levels(self):
+        """Credentials summary correctly reports global vs project for each credential."""
+        creds_json = json.dumps(
+            {
+                "openai": {"apiKey": "sk-project", "isGlobal": False},
+                "anthropic": {"apiKey": "sk-global", "isGlobal": True},
+            }
+        )
+        env = {
+            "AGENT_PROVIDER": "opencode",
+            "OPENCODE_PROVIDER": "openai",
+            "PROVIDER_CREDENTIALS": creds_json,
+        }
+        with patch.dict(os.environ, env, clear=True):
+            config = ProviderConfig.from_env()
+            summary = config.get_credentials_summary()
+
+            # OpenAI should be project
+            assert summary["credentials"]["openai"]["is_global"] is False
+            assert "project" in summary["credentials"]["openai"]["source"].lower()
+
+            # Anthropic should be global
+            assert summary["credentials"]["anthropic"]["is_global"] is True
+            assert "global" in summary["credentials"]["anthropic"]["source"].lower()
+
+    # -------------------------------------------------------------------------
+    # Legacy Claude Code Credential Inheritance Tests
+    # -------------------------------------------------------------------------
+
+    def test_legacy_claude_code_global_inheritance(self):
+        """Legacy Claude Code tokens should respect global flag."""
+        env = {
+            "AGENT_PROVIDER": "claude_code",
+            "CLAUDE_CODE_OAUTH_TOKEN": "legacy-global-token",
+            "CLAUDE_TOKEN_IS_GLOBAL": "true",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            config = ProviderConfig.from_env()
+
+            cred = config.get_credential("claude-code")
+            assert cred is not None
+            assert cred.is_global is True
+            assert cred.api_key == "legacy-global-token"
+
+    def test_legacy_claude_code_project_inheritance(self):
+        """Legacy Claude Code tokens default to project-level."""
+        env = {
+            "AGENT_PROVIDER": "claude_code",
+            "CLAUDE_CODE_OAUTH_TOKEN": "legacy-project-token",
+            # No CLAUDE_TOKEN_IS_GLOBAL set - defaults to project
+        }
+        with patch.dict(os.environ, env, clear=True):
+            config = ProviderConfig.from_env()
+
+            cred = config.get_credential("claude-code")
+            assert cred is not None
+            assert cred.is_global is False
+            assert cred.api_key == "legacy-project-token"
+
+    def test_provider_credentials_overrides_legacy_claude_token(self):
+        """PROVIDER_CREDENTIALS should override legacy CLAUDE_CODE_OAUTH_TOKEN."""
+        creds_json = json.dumps(
+            {
+                "claude-code": {
+                    "apiKey": "new-json-token",
+                    "isGlobal": False,
+                }
+            }
+        )
+        env = {
+            "AGENT_PROVIDER": "claude_code",
+            "PROVIDER_CREDENTIALS": creds_json,
+            "CLAUDE_CODE_OAUTH_TOKEN": "old-legacy-token",  # Should be overridden
+        }
+        with patch.dict(os.environ, env, clear=True):
+            config = ProviderConfig.from_env()
+
+            cred = config.get_credential("claude-code")
+            assert cred is not None
+            # JSON credential takes precedence
+            assert cred.api_key == "new-json-token"
+
+    # -------------------------------------------------------------------------
+    # Global Config Level vs Credential Level Tests
+    # -------------------------------------------------------------------------
+
+    def test_agent_provider_is_global_vs_credential_is_global(self):
+        """
+        AGENT_PROVIDER_IS_GLOBAL and credential.isGlobal are independent settings.
+
+        AGENT_PROVIDER_IS_GLOBAL indicates whether the active provider selection
+        comes from global settings.
+
+        credential.isGlobal indicates whether the credential itself is from
+        global settings or project settings.
+        """
+        creds_json = json.dumps(
+            {
+                "openai": {
+                    "apiKey": "sk-project-key",
+                    "isGlobal": False,  # Project credential
+                }
+            }
+        )
+        env = {
+            "AGENT_PROVIDER": "opencode",
+            "AGENT_PROVIDER_IS_GLOBAL": "true",  # Provider selected globally
+            "OPENCODE_PROVIDER": "openai",
+            "PROVIDER_CREDENTIALS": creds_json,
+        }
+        with patch.dict(os.environ, env, clear=True):
+            config = ProviderConfig.from_env()
+
+            # Provider selection is global
+            assert config.is_global is True
+
+            # But the credential itself is project-level
+            cred = config.get_credential("openai")
+            assert cred.is_global is False
+
+    def test_both_config_and_credential_global(self):
+        """When both config and credential are global."""
+        creds_json = json.dumps(
+            {
+                "openai": {
+                    "apiKey": "sk-global-key",
+                    "isGlobal": True,  # Global credential
+                }
+            }
+        )
+        env = {
+            "AGENT_PROVIDER": "opencode",
+            "AGENT_PROVIDER_IS_GLOBAL": "true",  # Provider selected globally
+            "OPENCODE_PROVIDER": "openai",
+            "PROVIDER_CREDENTIALS": creds_json,
+        }
+        with patch.dict(os.environ, env, clear=True):
+            config = ProviderConfig.from_env()
+
+            assert config.is_global is True
+            cred = config.get_credential("openai")
+            assert cred.is_global is True
+
+    def test_global_credential_without_api_key_is_valid(self):
+        """
+        Global credentials without explicit API key should be valid.
+
+        This allows for scenarios where global credentials use system-level
+        authentication (e.g., SSO, service accounts).
+        """
+        creds_json = json.dumps(
+            {
+                "zai": {
+                    "isGlobal": True,
+                    # No apiKey - relies on system-level auth
+                }
+            }
+        )
+        env = {
+            "AGENT_PROVIDER": "opencode",
+            "OPENCODE_PROVIDER": "zai",
+            "PROVIDER_CREDENTIALS": creds_json,
+        }
+        with patch.dict(os.environ, env, clear=True):
+            config = ProviderConfig.from_env()
+
+            cred = config.get_credential("zai")
+            assert cred is not None
+            assert cred.is_global is True
+            assert cred.api_key == ""  # No key set
+            assert cred.is_valid() is True  # Still valid because global
+
+    def test_project_credential_without_api_key_is_invalid(self):
+        """
+        Project credentials without explicit API key should be invalid.
+
+        Unlike global credentials, project credentials must have explicit
+        API keys as they cannot rely on system-level authentication.
+        """
+        creds_json = json.dumps(
+            {
+                "openai": {
+                    "isGlobal": False,
+                    # No apiKey - should be invalid for project
+                }
+            }
+        )
+        env = {
+            "AGENT_PROVIDER": "opencode",
+            "OPENCODE_PROVIDER": "openai",
+            "PROVIDER_CREDENTIALS": creds_json,
+        }
+        with patch.dict(os.environ, env, clear=True):
+            config = ProviderConfig.from_env()
+
+            cred = config.get_credential("openai")
+            assert cred is not None
+            assert cred.is_global is False
+            assert cred.api_key == ""
+            assert cred.is_valid() is False
+
+            # Should have validation error
+            errors = cred.get_validation_errors()
+            assert len(errors) > 0
+            assert "api key" in errors[0].lower()
+
+    # -------------------------------------------------------------------------
+    # End-to-End Inheritance Scenario Tests
+    # -------------------------------------------------------------------------
+
+    def test_e2e_global_credential_with_project_override_scenario(self):
+        """
+        Complete E2E test: Global credentials as fallback, project overrides specific ones.
+
+        Scenario:
+        - User has global OpenAI and Anthropic credentials
+        - Project uses OpenAI with a project-specific key
+        - Anthropic falls back to global
+        """
+        creds_json = json.dumps(
+            {
+                # OpenAI has project-level override
+                "openai": {
+                    "apiKey": "sk-project-specific",
+                    "isGlobal": False,
+                    "defaultModel": "gpt-4o-project",
+                },
+                # Anthropic uses global
+                "anthropic": {
+                    "apiKey": "sk-ant-global",
+                    "isGlobal": True,
+                    "defaultModel": "claude-3-5-sonnet",
+                },
+            }
+        )
+        env = {
+            "AGENT_PROVIDER": "opencode",
+            "OPENCODE_PROVIDER": "openai",  # Using OpenAI
+            "OPENCODE_MODEL": "gpt-4o",
+            "PROVIDER_CREDENTIALS": creds_json,
+        }
+        with patch.dict(os.environ, env, clear=True):
+            config = ProviderConfig.from_env()
+
+            # Verify configuration is valid
+            assert config.is_valid() is True
+            assert config.get_validation_errors() == []
+
+            # Active credential should be OpenAI (project-level)
+            active = config.get_active_credential()
+            assert active is not None
+            assert active.provider == "openai"
+            assert active.is_global is False
+            assert active.api_key == "sk-project-specific"
+
+            # If we switch to Anthropic, we'd get global credential
+            config2 = ProviderConfig(
+                provider=AgentProvider.OPENCODE,
+                opencode_provider="anthropic",
+                credentials=config.credentials,
+            )
+            active2 = config2.get_active_credential()
+            assert active2 is not None
+            assert active2.provider == "anthropic"
+            assert active2.is_global is True
+            assert active2.api_key == "sk-ant-global"
+
+    def test_e2e_provider_status_reflects_inheritance(self):
+        """Provider status should correctly reflect credential inheritance."""
+        creds_json = json.dumps(
+            {
+                "openai": {
+                    "apiKey": "sk-project",
+                    "isGlobal": False,
+                }
+            }
+        )
+        env = {
+            "AGENT_PROVIDER": "opencode",
+            "OPENCODE_PROVIDER": "openai",
+            "PROVIDER_CREDENTIALS": creds_json,
+        }
+        with patch.dict(os.environ, env, clear=True):
+            config = ProviderConfig.from_env()
+            status = config.get_provider_status()
+
+            assert status["is_valid"] is True
+            assert status["provider"] == "opencode"
+            assert "project" in status["credential_source"].lower()
+            assert status["errors"] == []
