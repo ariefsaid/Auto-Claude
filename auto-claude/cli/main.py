@@ -22,6 +22,14 @@ from ui import (
 
 from .build_commands import handle_build_command
 from .followup_commands import handle_followup_command
+from .provider_info import (
+    AgentProviderType,
+    ConfigSource,
+    load_global_settings,
+    load_project_env,
+    normalize_provider_id,
+    parse_provider_credentials,
+)
 from .qa_commands import (
     handle_qa_command,
     handle_qa_status_command,
@@ -42,6 +50,100 @@ from .workspace_commands import (
     handle_merge_command,
     handle_review_command,
 )
+
+# Type alias for provider configuration
+ProviderConfig = dict[str, str | bool | dict | None]
+
+
+def get_provider_config(
+    project_dir: Path,
+    cli_provider: str | None = None,
+) -> ProviderConfig:
+    """
+    Get provider configuration with priority: CLI flag > Project .env > Global settings > Default.
+
+    Args:
+        project_dir: Project root directory
+        cli_provider: Provider specified via --provider CLI flag (optional)
+
+    Returns:
+        ProviderConfig dictionary with:
+        - provider: Agent provider type ('claude_code' or 'opencode')
+        - source: Configuration source ('cli_flag', 'project_env', 'global_settings', 'default')
+        - opencode_provider: OpenCode LLM provider ID (if using opencode)
+        - opencode_model: OpenCode model override (if using opencode)
+        - is_global: Whether using global credentials
+        - credentials: Credential reference information
+    """
+    provider: AgentProviderType = "claude_code"
+    source: ConfigSource = "default"
+    opencode_provider: str | None = None
+    opencode_model: str | None = None
+    is_global: bool = False
+    credentials: dict = {}
+
+    # Priority 1: CLI flag (highest)
+    if cli_provider and cli_provider in ("claude_code", "opencode"):
+        provider = cli_provider  # type: ignore
+        source = "cli_flag"
+
+    # Priority 2: Project .env
+    if source == "default":
+        project_env = load_project_env(project_dir)
+        env_provider = project_env.get("AGENT_PROVIDER", "").strip().lower()
+        if env_provider in ("claude_code", "opencode"):
+            provider = env_provider  # type: ignore
+            source = "project_env"
+
+    # Priority 3: Global settings
+    if source == "default":
+        global_settings = load_global_settings()
+        global_provider = (
+            str(global_settings.get("globalDefaultProvider", "")).strip().lower()
+        )
+        if global_provider in ("claude_code", "opencode"):
+            provider = global_provider  # type: ignore
+            source = "global_settings"
+
+    # Load additional configuration based on provider type
+    if provider == "opencode":
+        # Load OpenCode-specific configuration
+        oc_project_env = load_project_env(project_dir)
+        oc_global_settings = load_global_settings()
+
+        # Get OpenCode provider and model
+        opencode_provider = oc_project_env.get("OPENCODE_PROVIDER", "").strip() or None
+        if not opencode_provider:
+            opencode_provider = oc_global_settings.get("globalOpencodeProvider") or None
+        if opencode_provider:
+            opencode_provider = normalize_provider_id(opencode_provider)
+
+        opencode_model = oc_project_env.get("OPENCODE_MODEL", "").strip() or None
+        if not opencode_model:
+            opencode_model = oc_global_settings.get("globalOpencodeModel") or None
+
+        # Check if using global credentials
+        is_global_str = oc_project_env.get("AGENT_PROVIDER_IS_GLOBAL", "").lower()
+        is_global = is_global_str == "true"
+
+        # Parse provider credentials
+        provider_credentials = parse_provider_credentials(
+            oc_project_env.get("PROVIDER_CREDENTIALS")
+        )
+        if opencode_provider and opencode_provider in provider_credentials:
+            credentials = provider_credentials[opencode_provider]
+            # Check credential reference's isGlobal flag
+            if credentials.get("isGlobal", False):
+                is_global = True
+
+    return {
+        "provider": provider,
+        "source": source,
+        "opencode_provider": opencode_provider,
+        "opencode_model": opencode_model,
+        "is_global": is_global,
+        "credentials": credentials,
+    }
 
 
 def parse_args() -> argparse.Namespace:
@@ -114,6 +216,14 @@ Environment Variables:
         type=str,
         default=None,
         help=f"Claude model to use (default: {DEFAULT_MODEL})",
+    )
+
+    parser.add_argument(
+        "--provider",
+        type=str,
+        choices=["claude_code", "opencode"],
+        default=None,
+        help="Agent provider type: 'claude_code' (official SDK) or 'opencode' (multi-provider CLI)",
     )
 
     parser.add_argument(
