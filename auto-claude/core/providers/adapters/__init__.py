@@ -48,6 +48,9 @@ from .opencode_messages import (
     parse_opencode_stream_line,
 )
 
+# OpenCode provider
+from .opencode_provider import OpenCodeProvider
+
 # OpenCode subprocess management
 from .opencode_subprocess import (
     OpenCodeCrashError,
@@ -69,7 +72,6 @@ from .opencode_tools import (
 )
 
 # The following imports will be added as they are implemented in subsequent subtasks:
-# from .opencode_provider import OpenCodeProvider
 # from .opencode_security import validate_opencode_command
 
 __all__ = [
@@ -96,7 +98,8 @@ __all__ = [
     "OpenCodeNotInstalledError",
     "OpenCodeTimeoutError",
     "OpenCodeCrashError",
-    # OpenCode adapters (to be implemented)
-    # "OpenCodeProvider",
+    # OpenCode provider
+    "OpenCodeProvider",
+    # OpenCode security (to be implemented)
     # "validate_opencode_command",
 ]
