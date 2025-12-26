@@ -1,0 +1,1 @@
+# Auto-Claude test suite
