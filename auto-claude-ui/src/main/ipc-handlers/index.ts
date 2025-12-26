@@ -28,6 +28,7 @@ import { registerChangelogHandlers } from './changelog-handlers';
 import { registerInsightsHandlers } from './insights-handlers';
 import { registerDockerHandlers } from './docker-handlers';
 import { registerAppUpdateHandlers } from './app-update-handlers';
+import { registerProviderHandlers } from './provider-handlers';
 import { notificationService } from '../notification-service';
 
 /**
@@ -98,6 +99,9 @@ export function setupIpcHandlers(
   // App auto-update handlers
   registerAppUpdateHandlers();
 
+  // Provider configuration handlers (multi-provider support)
+  registerProviderHandlers(getMainWindow);
+
   console.warn('[IPC] All handler modules registered successfully');
 }
 
@@ -119,5 +123,6 @@ export {
   registerChangelogHandlers,
   registerInsightsHandlers,
   registerDockerHandlers,
-  registerAppUpdateHandlers
+  registerAppUpdateHandlers,
+  registerProviderHandlers
 };
