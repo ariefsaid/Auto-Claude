@@ -109,6 +109,24 @@ export function registerEnvHandlers(
       existingVars['ENABLE_FANCY_UI'] = config.enableFancyUi ? 'true' : 'false';
     }
 
+    // Agent Provider Configuration (Multi-provider support)
+    if (config.agentProvider !== undefined) {
+      existingVars['AGENT_PROVIDER'] = config.agentProvider;
+    }
+    if (config.agentProviderIsGlobal !== undefined) {
+      existingVars['AGENT_PROVIDER_IS_GLOBAL'] = config.agentProviderIsGlobal ? 'true' : 'false';
+    }
+    if (config.providerCredentials !== undefined) {
+      // Serialize provider credentials as JSON
+      existingVars['PROVIDER_CREDENTIALS'] = JSON.stringify(config.providerCredentials);
+    }
+    if (config.opencodeProvider !== undefined) {
+      existingVars['OPENCODE_PROVIDER'] = config.opencodeProvider;
+    }
+    if (config.opencodeModel !== undefined) {
+      existingVars['OPENCODE_MODEL'] = config.opencodeModel;
+    }
+
     // Generate content with sections
     const content = `# Auto Claude Framework Environment Variables
 # Managed by Auto Claude UI
@@ -145,6 +163,21 @@ ${existingVars['DEFAULT_BRANCH'] ? `DEFAULT_BRANCH=${existingVars['DEFAULT_BRANC
 # UI SETTINGS (OPTIONAL)
 # =============================================================================
 ${existingVars['ENABLE_FANCY_UI'] !== undefined ? `ENABLE_FANCY_UI=${existingVars['ENABLE_FANCY_UI']}` : '# ENABLE_FANCY_UI=true'}
+
+# =============================================================================
+# AGENT PROVIDER (OPTIONAL)
+# Provider types: claude_code (default), opencode (multi-provider CLI)
+# =============================================================================
+${existingVars['AGENT_PROVIDER'] ? `AGENT_PROVIDER=${existingVars['AGENT_PROVIDER']}` : '# AGENT_PROVIDER=claude_code'}
+${existingVars['AGENT_PROVIDER_IS_GLOBAL'] !== undefined ? `AGENT_PROVIDER_IS_GLOBAL=${existingVars['AGENT_PROVIDER_IS_GLOBAL']}` : '# AGENT_PROVIDER_IS_GLOBAL=true'}
+
+# OpenCode Provider (when AGENT_PROVIDER=opencode)
+${existingVars['OPENCODE_PROVIDER'] ? `OPENCODE_PROVIDER=${existingVars['OPENCODE_PROVIDER']}` : '# OPENCODE_PROVIDER='}
+${existingVars['OPENCODE_MODEL'] ? `OPENCODE_MODEL=${existingVars['OPENCODE_MODEL']}` : '# OPENCODE_MODEL='}
+
+# Provider Credentials (JSON format)
+# Format: {"provider_id":{"isGlobal":true}} or {"provider_id":{"isGlobal":false,"apiKey":"..."}}
+${existingVars['PROVIDER_CREDENTIALS'] ? `PROVIDER_CREDENTIALS=${existingVars['PROVIDER_CREDENTIALS']}` : '# PROVIDER_CREDENTIALS={}'}
 
 # =============================================================================
 # MEMORY INTEGRATION
@@ -300,6 +333,44 @@ ${existingVars['GRAPHITI_DB_PATH'] ? `GRAPHITI_DB_PATH=${existingVars['GRAPHITI_
 
       if (vars['ENABLE_FANCY_UI']?.toLowerCase() === 'false') {
         config.enableFancyUi = false;
+      }
+
+      // Agent Provider Configuration (Multi-provider support)
+      const agentProvider = vars['AGENT_PROVIDER']?.toLowerCase();
+      if (agentProvider === 'claude_code' || agentProvider === 'opencode') {
+        config.agentProvider = agentProvider;
+      } else if (globalSettings.globalDefaultProvider) {
+        config.agentProvider = globalSettings.globalDefaultProvider;
+      }
+
+      // Parse AGENT_PROVIDER_IS_GLOBAL
+      if (vars['AGENT_PROVIDER_IS_GLOBAL'] !== undefined) {
+        config.agentProviderIsGlobal = vars['AGENT_PROVIDER_IS_GLOBAL']?.toLowerCase() === 'true';
+      }
+
+      // Parse OpenCode provider and model
+      if (vars['OPENCODE_PROVIDER']) {
+        config.opencodeProvider = vars['OPENCODE_PROVIDER'];
+      } else if (globalSettings.globalOpencodeProvider) {
+        config.opencodeProvider = globalSettings.globalOpencodeProvider;
+      }
+
+      if (vars['OPENCODE_MODEL']) {
+        config.opencodeModel = vars['OPENCODE_MODEL'];
+      } else if (globalSettings.globalOpencodeModel) {
+        config.opencodeModel = globalSettings.globalOpencodeModel;
+      }
+
+      // Parse PROVIDER_CREDENTIALS JSON
+      if (vars['PROVIDER_CREDENTIALS']) {
+        try {
+          const parsed = JSON.parse(vars['PROVIDER_CREDENTIALS']);
+          if (typeof parsed === 'object' && parsed !== null) {
+            config.providerCredentials = parsed;
+          }
+        } catch {
+          // Invalid JSON - leave providerCredentials undefined
+        }
       }
 
       // Populate graphitiProviderConfig from .env file (embeddings only - no LLM provider)
