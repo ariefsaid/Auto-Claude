@@ -299,5 +299,12 @@ export const IPC_CHANNELS = {
   RELEASE_GET_VERSIONS: 'release:getVersions',
 
   // Release events (main -> renderer)
-  RELEASE_PROGRESS: 'release:progress'
+  RELEASE_PROGRESS: 'release:progress',
+
+  // Provider operations (multi-provider support)
+  PROVIDER_GET_STATUS: 'provider:getStatus',       // Get provider configuration status for a project
+  PROVIDER_VALIDATE: 'provider:validate',           // Validate provider configuration before saving
+  PROVIDER_ADD_TO_GLOBAL: 'provider:addToGlobal',   // Add provider credentials to global settings
+  PROVIDER_GET_CONFIGURED: 'provider:getConfigured', // Get list of configured providers
+  PROVIDER_REMOVE_GLOBAL: 'provider:removeGlobal'   // Remove provider from global settings
 } as const;
