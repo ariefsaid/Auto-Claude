@@ -71,6 +71,21 @@ if sys.platform == "win32":
         del _new_stream
 
 from cli import main
+from cli.provider_info import (
+    get_provider_status,
+    load_global_settings,
+    normalize_provider_id,
+    validate_provider_config,
+)
+
+# Re-export for external access
+__all__ = [
+    "main",
+    "load_global_settings",
+    "validate_provider_config",
+    "get_provider_status",
+    "normalize_provider_id",
+]
 
 if __name__ == "__main__":
     main()
