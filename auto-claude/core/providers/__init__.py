@@ -17,6 +17,10 @@ Usage:
         AgentProvider,
         ProviderCredential,
         ProviderConfig,
+        UniversalMessage,
+        TextContent,
+        ToolUseContent,
+        ToolResultContent,
     )
 
     # Normalize provider names to consistent IDs
@@ -34,9 +38,22 @@ Usage:
 
     # Load configuration from environment
     config = ProviderConfig.from_env()
+
+    # Create universal messages
+    msg = UniversalMessage(
+        role="assistant",
+        content=[TextContent(text="Hello, world!")],
+    )
 """
 
 from .config import AgentProvider, ProviderConfig, ProviderCredential
+from .messages import (
+    ContentBlock,
+    TextContent,
+    ToolResultContent,
+    ToolUseContent,
+    UniversalMessage,
+)
 from .utils import normalize_provider_id
 
 __all__ = [
@@ -44,6 +61,12 @@ __all__ = [
     "AgentProvider",
     "ProviderConfig",
     "ProviderCredential",
+    # Message types
+    "UniversalMessage",
+    "TextContent",
+    "ToolUseContent",
+    "ToolResultContent",
+    "ContentBlock",
     # Utility functions
     "normalize_provider_id",
 ]
