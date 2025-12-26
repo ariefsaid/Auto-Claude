@@ -12,14 +12,38 @@ This package provides:
 - Provider client interface and factory
 
 Usage:
-    from auto_claude.core.providers import normalize_provider_id
+    from auto_claude.core.providers import (
+        normalize_provider_id,
+        AgentProvider,
+        ProviderCredential,
+        ProviderConfig,
+    )
 
     # Normalize provider names to consistent IDs
     provider_id = normalize_provider_id("AWS Bedrock")  # Returns "aws-bedrock"
+
+    # Get agent provider enum
+    provider = AgentProvider.CLAUDE_CODE
+
+    # Create provider credential
+    credential = ProviderCredential(
+        provider="openai",
+        api_key="sk-...",
+        default_model="gpt-4o",
+    )
+
+    # Load configuration from environment
+    config = ProviderConfig.from_env()
 """
 
+from .config import AgentProvider, ProviderConfig, ProviderCredential
 from .utils import normalize_provider_id
 
 __all__ = [
+    # Core classes
+    "AgentProvider",
+    "ProviderConfig",
+    "ProviderCredential",
+    # Utility functions
     "normalize_provider_id",
 ]
