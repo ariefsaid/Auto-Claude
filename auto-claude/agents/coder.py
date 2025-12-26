@@ -8,6 +8,7 @@ Main autonomous agent loop that runs the coder agent to implement subtasks.
 import asyncio
 import logging
 from pathlib import Path
+from typing import Any
 
 from core.client import create_client
 from linear_updater import (
@@ -74,6 +75,7 @@ async def run_autonomous_agent(
     max_iterations: int | None = None,
     verbose: bool = False,
     source_spec_dir: Path | None = None,
+    provider_config: dict[str, Any] | None = None,
 ) -> None:
     """
     Run the autonomous agent loop with automatic memory management.
@@ -88,6 +90,14 @@ async def run_autonomous_agent(
         max_iterations: Maximum number of iterations (None for unlimited)
         verbose: Whether to show detailed output
         source_spec_dir: Original spec directory in main project (for syncing from worktree)
+        provider_config: Provider configuration dict with fields:
+            - provider: AgentProviderType ("claude_code" or "opencode")
+            - source: ConfigSource ("cli_flag", "project_env", "global_settings", "default")
+            - opencode_provider: Optional normalized LLM provider ID
+            - opencode_model: Optional model name override
+            - is_global: Whether using global credentials
+            - credentials: Optional credentials dictionary
+            If None, defaults to claude_code provider with project/env configuration.
     """
     # Initialize recovery manager (handles memory persistence)
     recovery_manager = RecoveryManager(spec_dir, project_dir)
@@ -252,11 +262,16 @@ async def run_autonomous_agent(
         phase_thinking_budget = get_phase_thinking_budget(spec_dir, current_phase)
 
         # Create client (fresh context) with phase-specific model and thinking
+        # Note: provider_config is passed through for future multi-provider support
+        # Once create_client is updated to accept provider_config, it will be used here
+        # to create the appropriate client (ClaudeSDKClient or OpenCodeClient)
         client = create_client(
             project_dir,
             spec_dir,
             phase_model,
             max_thinking_tokens=phase_thinking_budget,
+            # TODO: Pass provider_config when create_client supports it
+            # provider_config=provider_config,
         )
 
         # Generate appropriate prompt
@@ -490,3 +505,7 @@ async def run_autonomous_agent(
         status_manager.update(state=BuildState.COMPLETE)
     else:
         status_manager.update(state=BuildState.PAUSED)
+
+
+# Alias for convenience
+run_coder_agent = run_autonomous_agent

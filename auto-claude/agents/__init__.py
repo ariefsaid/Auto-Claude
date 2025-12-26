@@ -31,6 +31,7 @@ from .planner import run_followup_planner
 
 # Session management
 from .session import (
+    AgentClient,
     post_session_processing,
     run_agent_session,
 )
@@ -55,6 +56,7 @@ __all__ = [
     "save_session_memory",
     "save_session_to_graphiti",
     # Session
+    "AgentClient",
     "run_agent_session",
     "post_session_processing",
     # Utils

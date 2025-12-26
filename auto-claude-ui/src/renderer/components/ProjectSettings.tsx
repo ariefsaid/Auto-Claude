@@ -23,6 +23,9 @@ import { GitHubIntegrationSection } from './project-settings/GitHubIntegrationSe
 import { MemoryBackendSection } from './project-settings/MemoryBackendSection';
 import { AgentConfigSection } from './project-settings/AgentConfigSection';
 import { NotificationsSection } from './project-settings/NotificationsSection';
+import { AgentProviderSection } from './settings/AgentProviderSection';
+import { useSettingsStore, saveSettings } from '../stores/settings-store';
+import type { AgentProviderType, ProviderCredential, ProviderCredentialsStore } from '../../shared/types/provider';
 
 interface ProjectSettingsProps {
   project: Project;
@@ -39,10 +42,14 @@ export function ProjectSettings({ project, open, onOpenChange }: ProjectSettings
   // Collapsible sections state
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     claude: true,
+    provider: true,  // Agent provider section expanded by default
     linear: false,
     github: false,
     graphiti: false
   });
+
+  // Get global app settings from settings store for provider credentials
+  const appSettings = useSettingsStore((state) => state.settings);
 
   // Custom hooks for state management
   const { settings, setSettings, versionInfo, setVersionInfo, isCheckingVersion } = useProjectSettings(project, open);
@@ -167,6 +174,39 @@ export function ProjectSettings({ project, open, onOpenChange }: ProjectSettings
     });
   };
 
+  // Handler for adding a new provider to global settings
+  const handleAddGlobalProvider = async (credential: ProviderCredential) => {
+    const currentCredentials = appSettings.providerCredentials || {};
+    const updatedCredentials = {
+      ...currentCredentials,
+      [credential.provider]: credential,
+    };
+
+    // Save to global settings
+    await saveSettings({ providerCredentials: updatedCredentials });
+  };
+
+  // Handlers for provider configuration changes
+  const handleAgentProviderChange = (provider: AgentProviderType) => {
+    updateEnvConfig({ agentProvider: provider });
+  };
+
+  const handleProviderGlobalChange = (isGlobal: boolean) => {
+    updateEnvConfig({ agentProviderIsGlobal: isGlobal });
+  };
+
+  const handleOpencodeProviderChange = (providerId: string) => {
+    updateEnvConfig({ opencodeProvider: providerId });
+  };
+
+  const handleOpencodeModelChange = (model: string) => {
+    updateEnvConfig({ opencodeModel: model });
+  };
+
+  const handleProviderCredentialsChange = (credentials: ProviderCredentialsStore) => {
+    updateEnvConfig({ providerCredentials: credentials });
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[600px] max-h-[85vh] flex flex-col overflow-hidden">
@@ -208,6 +248,24 @@ export function ProjectSettings({ project, open, onOpenChange }: ProjectSettings
                   authStatus={claudeAuthStatus}
                   onClaudeSetup={handleClaudeSetupWithCallback}
                   onUpdateConfig={updateEnvConfig}
+                />
+
+                <Separator />
+
+                {/* Agent Provider Section */}
+                <AgentProviderSection
+                  agentProvider={envConfig.agentProvider || 'claude_code'}
+                  onAgentProviderChange={handleAgentProviderChange}
+                  isGlobal={envConfig.agentProviderIsGlobal ?? true}
+                  onGlobalChange={handleProviderGlobalChange}
+                  opencodeProvider={envConfig.opencodeProvider}
+                  onOpencodeProviderChange={handleOpencodeProviderChange}
+                  opencodeModel={envConfig.opencodeModel}
+                  onOpencodeModelChange={handleOpencodeModelChange}
+                  providerCredentials={envConfig.providerCredentials}
+                  onProviderCredentialsChange={handleProviderCredentialsChange}
+                  appSettings={appSettings}
+                  onAddGlobalProvider={handleAddGlobalProvider}
                 />
 
                 <Separator />

@@ -10,9 +10,10 @@ This package provides a modular CLI structure:
 - build_commands.py: Build execution and follow-up tasks
 - workspace_commands.py: Workspace management (merge, review, discard)
 - qa_commands.py: QA validation commands
+- provider_info.py: Provider configuration and validation utilities
 - utils.py: Shared utilities and configuration
 """
 
-from .main import main
+from .main import get_provider_config, main
 
-__all__ = ["main"]
+__all__ = ["main", "get_provider_config"]

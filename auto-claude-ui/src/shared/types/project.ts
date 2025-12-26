@@ -2,6 +2,8 @@
  * Project-related types
  */
 
+import type { AgentProviderType, ProviderCredentialsStore } from './provider';
+
 export interface Project {
   id: string;
   name: string;
@@ -266,6 +268,18 @@ export interface ProjectEnvConfig {
   claudeAuthStatus: 'authenticated' | 'token_set' | 'not_configured';
   // Indicates if the Claude token is from global settings (not project-specific)
   claudeTokenIsGlobal?: boolean;
+
+  // Agent Provider Configuration (Multi-provider support)
+  /** The agent provider type to use (default: 'claude_code') */
+  agentProvider?: AgentProviderType;
+  /** Whether using global credentials for the selected provider */
+  agentProviderIsGlobal?: boolean;
+  /** Provider credentials store - maps normalized provider IDs to credential references (JSON) */
+  providerCredentials?: ProviderCredentialsStore;
+  /** Normalized LLM provider ID for OpenCode (e.g., 'openai', 'zai-glm') */
+  opencodeProvider?: string;
+  /** Model override for OpenCode (e.g., 'gpt-4o', 'glm-4.7') */
+  opencodeModel?: string;
 
   // Model Override
   autoBuildModel?: string;

@@ -24,6 +24,7 @@ Your AI coding companion. Build features, fix bugs, and ship faster — with aut
 - **Self-Validating**: Built-in QA loop catches issues before you review
 - **Isolated Workspaces**: All work happens in git worktrees — your code stays safe
 - **AI Merge Resolution**: Intelligent conflict resolution when merging back to main — no manual conflict fixing
+- **Multi-Provider Support**: Use Claude Code (default) or switch to OpenCode for 20+ LLM providers including OpenAI, Gemini, and more
 - **Cross-Platform**: Desktop app runs on Mac, Windows, and Linux
 - **Any Project Type**: Build web apps, APIs, CLIs — works with any software project
 
@@ -131,6 +132,37 @@ When your main branch evolves while a build is in progress, Auto Claude automati
 4. **Syntax Validation** — Every merge is validated before being applied
 
 **The result:** A build that was 50+ commits behind main merges in seconds instead of requiring manual conflict resolution.
+
+### Multi-Provider Support
+
+Auto Claude gives you flexibility in choosing your AI provider. Use Claude Code (recommended default) or switch to OpenCode for access to 20+ LLM providers.
+
+| Provider | Description | Best For |
+|----------|-------------|----------|
+| **Claude Code** | Official Claude Code SDK with OAuth | Most users (recommended) |
+| **OpenCode** | Multi-provider CLI (20+ LLMs) | Cost optimization, specific model preferences |
+
+**Supported OpenCode Providers:**
+- **OpenAI** — GPT-4o, GPT-4o-mini, o1, o1-mini
+- **Google Gemini** — Gemini 1.5 Pro, Gemini 1.5 Flash
+- **Groq** — Ultra-fast Llama 3.1 inference
+- **Together AI, Mistral, Fireworks** — Open-source models
+- **Ollama** — Run models locally (free, private)
+- **Custom providers** — Any OpenAI-compatible API
+
+**Configure via UI:**
+1. Open Project Settings → Provider tab
+2. Select your agent provider (Claude Code or OpenCode)
+3. If OpenCode: choose your LLM provider and configure credentials
+4. Save settings
+
+**Configure via CLI:**
+```bash
+# Override provider for a single run
+python auto-claude/run.py --spec 001 --provider opencode
+```
+
+See **[docs/PROVIDERS.md](docs/PROVIDERS.md)** for detailed setup guides and **[docs/COST_COMPARISON.md](docs/COST_COMPARISON.md)** for pricing analysis.
 
 ---
 

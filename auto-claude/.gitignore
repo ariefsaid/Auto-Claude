@@ -59,5 +59,9 @@ Thumbs.db
 .claude_settings.json
 .auto-build-security.json
 
-# Tests - now included in version control for multi-provider backend tests
-# tests/
+# Tests - keep tracked, but ignore cache/temp files
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+.hypothesis/
