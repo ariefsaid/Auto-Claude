@@ -51,6 +51,15 @@ from .opencode_messages import (
 # OpenCode provider
 from .opencode_provider import OpenCodeProvider
 
+# OpenCode security validation
+from .opencode_security import (
+    OpenCodeSecurityValidator,
+    ValidationResult,
+    create_security_wrapper,
+    validate_opencode_command,
+    validate_opencode_tool_call,
+)
+
 # OpenCode subprocess management
 from .opencode_subprocess import (
     OpenCodeCrashError,
@@ -70,9 +79,6 @@ from .opencode_tools import (
     translate_from_opencode,
     translate_to_opencode,
 )
-
-# The following imports will be added as they are implemented in subsequent subtasks:
-# from .opencode_security import validate_opencode_command
 
 __all__ = [
     # Claude adapters
@@ -100,6 +106,10 @@ __all__ = [
     "OpenCodeCrashError",
     # OpenCode provider
     "OpenCodeProvider",
-    # OpenCode security (to be implemented)
-    # "validate_opencode_command",
+    # OpenCode security validation
+    "validate_opencode_command",
+    "validate_opencode_tool_call",
+    "OpenCodeSecurityValidator",
+    "ValidationResult",
+    "create_security_wrapper",
 ]
