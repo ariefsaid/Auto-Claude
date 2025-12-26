@@ -37,9 +37,9 @@ Usage:
 
 # Claude adapters
 from .claude_adapter import ClaudeMessageAdapter
+from .claude_provider import ClaudeProvider
 
 # The following imports will be added as they are implemented in subsequent subtasks:
-# from .claude_provider import ClaudeProvider
 # from .opencode_provider import OpenCodeProvider
 # from .opencode_messages import parse_opencode_response
 # from .opencode_tools import translate_tool_name
@@ -49,7 +49,7 @@ from .claude_adapter import ClaudeMessageAdapter
 __all__ = [
     # Claude adapters
     "ClaudeMessageAdapter",
-    # ClaudeProvider (to be implemented)
+    "ClaudeProvider",
     # OpenCode adapters (to be implemented)
     # "OpenCodeProvider",
     # "parse_opencode_response",
