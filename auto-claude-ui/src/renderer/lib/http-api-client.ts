@@ -16,9 +16,23 @@ import type {
   TaskStatus,
   TaskStartOptions,
   ImplementationPlan,
-  ExecutionProgress
+  ExecutionProgress,
+  WorktreeStatus,
+  WorktreeDiff,
+  WorktreeMergeResult,
+  WorktreeDiscardResult,
+  WorktreeListResult,
+  TaskRecoveryResult,
+  TaskRecoveryOptions,
+  TaskMetadata
 } from '../../shared/types/task';
-import type { Project } from '../../shared/types/project';
+import type {
+  Project,
+  ProjectContextData,
+  ProjectIndex,
+  ProjectEnvConfig,
+  GitStatus
+} from '../../shared/types/project';
 
 // Get API URLs from environment variables
 const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8766';
@@ -219,6 +233,158 @@ export class HttpApiClient implements Partial<ElectronAPI> {
     });
   }
 
+  async createTask(
+    projectId: string,
+    title: string,
+    description: string,
+    metadata?: TaskMetadata
+  ): Promise<IPCResult<Task>> {
+    return this.apiRequest<Task>('POST', '/api/tasks', {
+      projectId,
+      title,
+      description,
+      requireReviewBeforeCoding: metadata?.requireReviewBeforeCoding || false
+    });
+  }
+
+  async deleteTask(taskId: string): Promise<IPCResult> {
+    // taskId format is "task-{specId}" or just specId
+    const specId = taskId.startsWith('task-') ? taskId.substring(5) : taskId;
+    // Note: Need project_id from context - for now use query param
+    return this.apiRequest('DELETE', `/api/tasks/${specId}?project_id=`);
+  }
+
+  async updateTask(
+    taskId: string,
+    updates: { title?: string; description?: string }
+  ): Promise<IPCResult<Task>> {
+    const specId = taskId.startsWith('task-') ? taskId.substring(5) : taskId;
+    return this.apiRequest<Task>('PUT', `/api/tasks/${specId}?project_id=`, updates);
+  }
+
+  async submitReview(
+    taskId: string,
+    approved: boolean,
+    feedback?: string
+  ): Promise<IPCResult> {
+    const specId = taskId.startsWith('task-') ? taskId.substring(5) : taskId;
+    return this.apiRequest('POST', `/api/tasks/${specId}/review`, {
+      action: approved ? 'approve' : 'reject',
+      feedback,
+      projectId: ''
+    });
+  }
+
+  async updateTaskStatus(taskId: string, status: TaskStatus): Promise<IPCResult> {
+    const specId = taskId.startsWith('task-') ? taskId.substring(5) : taskId;
+    return this.apiRequest('POST', `/api/tasks/${specId}/status?project_id=`, {
+      status,
+      autoStart: false
+    });
+  }
+
+  async recoverStuckTask(
+    taskId: string,
+    _options?: TaskRecoveryOptions
+  ): Promise<IPCResult<TaskRecoveryResult>> {
+    const specId = taskId.startsWith('task-') ? taskId.substring(5) : taskId;
+    return this.apiRequest<TaskRecoveryResult>('POST', `/api/tasks/${specId}/recover?project_id=`);
+  }
+
+  async checkTaskRunning(taskId: string): Promise<IPCResult<boolean>> {
+    const result = await this.apiRequest<{ count: number; tasks: any[] }>('GET', '/api/tasks/running');
+    if (result.success && result.data) {
+      const isRunning = result.data.tasks.some((t: any) => t.taskId === taskId);
+      return { success: true, data: isRunning };
+    }
+    return { success: true, data: false };
+  }
+
+  async getRunningTaskCount(): Promise<IPCResult<number>> {
+    const result = await this.apiRequest<{ count: number }>('GET', '/api/tasks/running');
+    if (result.success && result.data) {
+      return { success: true, data: result.data.count };
+    }
+    return { success: true, data: 0 };
+  }
+
+  // =========================================================================
+  // Workspace/Worktree Operations
+  // =========================================================================
+
+  async getWorktreeStatus(taskId: string): Promise<IPCResult<WorktreeStatus>> {
+    const specId = taskId.startsWith('task-') ? taskId.substring(5) : taskId;
+    return this.apiRequest<WorktreeStatus>('GET', `/api/workspace/status?spec_id=${specId}&project_id=`);
+  }
+
+  async getWorktreeDiff(taskId: string): Promise<IPCResult<WorktreeDiff>> {
+    const specId = taskId.startsWith('task-') ? taskId.substring(5) : taskId;
+    return this.apiRequest<WorktreeDiff>('GET', `/api/workspace/diff?spec_id=${specId}&project_id=`);
+  }
+
+  async mergeWorktree(
+    taskId: string,
+    options?: { noCommit?: boolean }
+  ): Promise<IPCResult<WorktreeMergeResult>> {
+    const specId = taskId.startsWith('task-') ? taskId.substring(5) : taskId;
+    return this.apiRequest<WorktreeMergeResult>('POST', '/api/workspace/merge', {
+      specId,
+      projectId: '',
+      noCommit: options?.noCommit
+    });
+  }
+
+  async mergeWorktreePreview(taskId: string): Promise<IPCResult<WorktreeMergeResult>> {
+    const specId = taskId.startsWith('task-') ? taskId.substring(5) : taskId;
+    return this.apiRequest<WorktreeMergeResult>('POST', '/api/workspace/merge-preview', {
+      specId,
+      projectId: ''
+    });
+  }
+
+  async discardWorktree(taskId: string): Promise<IPCResult<WorktreeDiscardResult>> {
+    const specId = taskId.startsWith('task-') ? taskId.substring(5) : taskId;
+    return this.apiRequest<WorktreeDiscardResult>('POST', '/api/workspace/discard', {
+      specId,
+      projectId: ''
+    });
+  }
+
+  async listWorktrees(projectId: string): Promise<IPCResult<WorktreeListResult>> {
+    return this.apiRequest<WorktreeListResult>('GET', `/api/workspace/list?project_id=${projectId}`);
+  }
+
+  // =========================================================================
+  // Task Archive Operations
+  // =========================================================================
+
+  async archiveTasks(
+    projectId: string,
+    taskIds: string[],
+    _version?: string
+  ): Promise<IPCResult<boolean>> {
+    // Archive each task individually
+    const results = await Promise.all(
+      taskIds.map(taskId => {
+        const specId = taskId.startsWith('task-') ? taskId.substring(5) : taskId;
+        return this.apiRequest('POST', `/api/tasks/${specId}/archive?project_id=${projectId}`);
+      })
+    );
+    const allSuccess = results.every(r => r.success);
+    return { success: allSuccess, data: allSuccess };
+  }
+
+  async unarchiveTasks(projectId: string, taskIds: string[]): Promise<IPCResult<boolean>> {
+    const results = await Promise.all(
+      taskIds.map(taskId => {
+        const specId = taskId.startsWith('task-') ? taskId.substring(5) : taskId;
+        return this.apiRequest('POST', `/api/tasks/${specId}/unarchive?project_id=${projectId}`);
+      })
+    );
+    const allSuccess = results.every(r => r.success);
+    return { success: allSuccess, data: allSuccess };
+  }
+
   // =========================================================================
   // Event Listeners
   // =========================================================================
@@ -274,7 +440,7 @@ export class HttpApiClient implements Partial<ElectronAPI> {
   }
 
   // =========================================================================
-  // Project Operations (Basic)
+  // Project Operations
   // =========================================================================
 
   async getProjects(): Promise<IPCResult<Project[]>> {
@@ -283,6 +449,148 @@ export class HttpApiClient implements Partial<ElectronAPI> {
 
   async addProject(projectPath: string): Promise<IPCResult<Project>> {
     return this.apiRequest<Project>('POST', '/api/projects', { projectPath });
+  }
+
+  async removeProject(projectId: string): Promise<IPCResult> {
+    return this.apiRequest('DELETE', `/api/projects/${projectId}`);
+  }
+
+  async updateProjectSettings(
+    projectId: string,
+    settings: Partial<any>
+  ): Promise<IPCResult> {
+    return this.apiRequest('PUT', `/api/projects/${projectId}`, { settings });
+  }
+
+  async initializeProject(projectId: string): Promise<IPCResult<any>> {
+    return this.apiRequest('POST', `/api/projects/${projectId}/init`);
+  }
+
+  // =========================================================================
+  // Context Operations
+  // =========================================================================
+
+  async getProjectContext(projectId: string): Promise<IPCResult<ProjectContextData>> {
+    return this.apiRequest<ProjectContextData>('GET', `/api/context?project_id=${projectId}`);
+  }
+
+  async refreshProjectIndex(projectId: string): Promise<IPCResult<ProjectIndex>> {
+    return this.apiRequest<ProjectIndex>('POST', `/api/context/refresh?project_id=${projectId}`);
+  }
+
+  async searchContext(
+    projectId: string,
+    query: string,
+    limit?: number
+  ): Promise<IPCResult<any>> {
+    return this.apiRequest('GET', `/api/context/search?project_id=${projectId}&query=${encodeURIComponent(query)}&limit=${limit || 20}`);
+  }
+
+  // =========================================================================
+  // Git Operations
+  // =========================================================================
+
+  async getGitStatus(projectId: string): Promise<IPCResult<GitStatus>> {
+    return this.apiRequest<GitStatus>('GET', `/api/git/status?project_id=${projectId}`);
+  }
+
+  async getGitBranches(projectId: string): Promise<IPCResult<any>> {
+    return this.apiRequest('GET', `/api/git/branches?project_id=${projectId}`);
+  }
+
+  async getCurrentBranch(projectId: string): Promise<IPCResult<string>> {
+    const result = await this.apiRequest<{ branch: string }>('GET', `/api/git/current-branch?project_id=${projectId}`);
+    if (result.success && result.data) {
+      return { success: true, data: result.data.branch };
+    }
+    return { success: false, error: result.error };
+  }
+
+  async getMainBranch(projectId: string): Promise<IPCResult<string>> {
+    const result = await this.apiRequest<{ mainBranch: string }>('GET', `/api/git/main-branch?project_id=${projectId}`);
+    if (result.success && result.data) {
+      return { success: true, data: result.data.mainBranch };
+    }
+    return { success: false, error: result.error };
+  }
+
+  async initGit(projectId: string): Promise<IPCResult<any>> {
+    return this.apiRequest('POST', `/api/git/init?project_id=${projectId}`);
+  }
+
+  // =========================================================================
+  // Provider Operations
+  // =========================================================================
+
+  async getProviderStatus(): Promise<IPCResult<any>> {
+    return this.apiRequest('GET', '/api/provider/status');
+  }
+
+  async validateProvider(
+    provider: string,
+    apiKey: string
+  ): Promise<IPCResult<any>> {
+    return this.apiRequest('POST', '/api/provider/validate', { provider, apiKey });
+  }
+
+  async testProvider(
+    provider: string,
+    apiKey: string,
+    model?: string
+  ): Promise<IPCResult<any>> {
+    return this.apiRequest('POST', '/api/provider/test', { provider, apiKey, model });
+  }
+
+  async getConfiguredProviders(): Promise<IPCResult<any>> {
+    return this.apiRequest('GET', '/api/provider/configured');
+  }
+
+  async addProviderToGlobal(
+    provider: string,
+    apiKey: string
+  ): Promise<IPCResult<any>> {
+    return this.apiRequest('POST', '/api/provider/add', { provider, apiKey });
+  }
+
+  async removeGlobalProvider(providerId: string): Promise<IPCResult<any>> {
+    return this.apiRequest('DELETE', `/api/provider/${providerId}`);
+  }
+
+  async getProviderModels(provider?: string): Promise<IPCResult<any>> {
+    const url = provider ? `/api/provider/models?provider=${provider}` : '/api/provider/models';
+    return this.apiRequest('GET', url);
+  }
+
+  // =========================================================================
+  // Environment Operations
+  // =========================================================================
+
+  async checkClaudeAuth(_projectId: string): Promise<IPCResult<any>> {
+    return this.apiRequest('GET', '/api/env/check-auth');
+  }
+
+  // =========================================================================
+  // Spec Operations
+  // =========================================================================
+
+  async getSpecContent(specId: string, projectId: string): Promise<IPCResult<any>> {
+    return this.apiRequest('GET', `/api/spec/${specId}?project_id=${projectId}`);
+  }
+
+  async getSpecPlan(specId: string, projectId: string): Promise<IPCResult<any>> {
+    return this.apiRequest('GET', `/api/spec/${specId}/plan?project_id=${projectId}`);
+  }
+
+  async getSpecQA(specId: string, projectId: string): Promise<IPCResult<any>> {
+    return this.apiRequest('GET', `/api/spec/${specId}/qa?project_id=${projectId}`);
+  }
+
+  async getSpecLogs(specId: string, projectId: string): Promise<IPCResult<any>> {
+    return this.apiRequest('GET', `/api/spec/${specId}/logs?project_id=${projectId}`);
+  }
+
+  async clearSpecLogs(specId: string, projectId: string): Promise<IPCResult<any>> {
+    return this.apiRequest('POST', `/api/spec/${specId}/logs/clear?project_id=${projectId}`);
   }
 
   // =========================================================================

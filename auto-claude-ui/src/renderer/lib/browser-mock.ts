@@ -154,12 +154,39 @@ export async function initBrowserMock(): Promise<void> {
 
       // Bind HTTP client methods (class methods are on prototype, not own properties)
       const methodNames = [
-        'getTasks', 'startTask', 'stopTask',
+        // Task operations
+        'getTasks', 'createTask', 'deleteTask', 'updateTask',
+        'startTask', 'stopTask', 'submitReview', 'updateTaskStatus',
+        'recoverStuckTask', 'checkTaskRunning', 'getRunningTaskCount',
+        // Workspace/Worktree operations
+        'getWorktreeStatus', 'getWorktreeDiff', 'mergeWorktree',
+        'mergeWorktreePreview', 'discardWorktree', 'listWorktrees',
+        // Archive operations
+        'archiveTasks', 'unarchiveTasks',
+        // Event listeners
         'onTaskProgress', 'onTaskError', 'onTaskLog',
         'onTaskStatusChange', 'onTaskExecutionProgress',
-        'getProjects', 'addProject',
+        // Project operations
+        'getProjects', 'addProject', 'removeProject',
+        'updateProjectSettings', 'initializeProject',
+        // Context operations
+        'getProjectContext', 'refreshProjectIndex', 'searchContext',
+        // Git operations
+        'getGitStatus', 'getGitBranches', 'getCurrentBranch',
+        'getMainBranch', 'initGit',
+        // Provider operations
+        'getProviderStatus', 'validateProvider', 'testProvider',
+        'getConfiguredProviders', 'addProviderToGlobal',
+        'removeGlobalProvider', 'getProviderModels',
+        // Environment operations
+        'checkClaudeAuth',
+        // Spec operations
+        'getSpecContent', 'getSpecPlan', 'getSpecQA',
+        'getSpecLogs', 'clearSpecLogs',
+        // Settings operations
         'getSettings', 'saveSettings',
         'getProjectEnv', 'updateProjectEnv',
+        // App info
         'getAppVersion', 'disconnect'
       ];
 
