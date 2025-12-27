@@ -54,12 +54,12 @@ class TaskProcess:
             True if started successfully
         """
         try:
-            # Get Python executable from virtual environment
-            venv_python = self._get_venv_python(project_dir)
-
-            # Build command args
-            auto_claude_dir = Path(project_dir) / "auto-claude"
+            # Auto-claude directory is where this script is located (up two levels from api/utils/)
+            auto_claude_dir = Path(__file__).parent.parent.parent
             run_script = auto_claude_dir / "run.py"
+
+            # Get Python executable from virtual environment
+            venv_python = self._get_venv_python(auto_claude_dir)
 
             args = [
                 str(venv_python),
@@ -81,6 +81,7 @@ class TaskProcess:
                 if options.get("qaOnly"):
                     args.append("--qa")
 
+            print(f"[IPC] Starting task {self.task_id}: {' '.join(args)}")
             logger.info(f"Starting task {self.task_id}: {' '.join(args)}")
 
             # Spawn subprocess
@@ -218,17 +219,16 @@ class TaskProcess:
             # Ignore parsing errors - not all logs have markers
             pass
 
-    def _get_venv_python(self, project_dir: str) -> Path:
+    def _get_venv_python(self, auto_claude_dir: Path) -> Path:
         """
         Get Python executable from virtual environment.
 
         Args:
-            project_dir: Project directory
+            auto_claude_dir: Auto-claude directory
 
         Returns:
             Path to Python executable
         """
-        auto_claude_dir = Path(project_dir) / "auto-claude"
         venv_dir = auto_claude_dir / ".venv"
 
         # Check for venv
@@ -323,3 +323,228 @@ def get_task_status(task_id: str) -> dict[str, Any]:
         }
     else:
         return {"success": False, "taskId": task_id, "error": "Task not found"}
+
+
+class SpecCreationProcess:
+    """Manages a Python subprocess for spec creation via spec_runner.py."""
+
+    def __init__(self, task_id: str, ws_manager):
+        """
+        Initialize spec creation process manager.
+
+        Args:
+            task_id: Unique task identifier
+            ws_manager: WebSocket manager for streaming output
+        """
+        self.task_id = task_id
+        self.ws_manager = ws_manager
+        self.process: asyncio.subprocess.Process | None = None
+        self.is_running = False
+
+    async def start(
+        self,
+        project_dir: str,
+        spec_dir: str,
+        task_description: str,
+        auto_approve: bool = True,
+    ):
+        """
+        Start spec creation subprocess.
+
+        Args:
+            project_dir: Project directory path
+            spec_dir: Spec directory path
+            task_description: Task description for spec creation
+            auto_approve: Whether to auto-approve spec without review
+
+        Returns:
+            True if started successfully
+        """
+        try:
+            # Auto-claude directory is where this script is located
+            auto_claude_dir = Path(__file__).parent.parent.parent
+            spec_runner_script = auto_claude_dir / "runners" / "spec_runner.py"
+
+            # Get Python executable from virtual environment
+            venv_python = self._get_venv_python(auto_claude_dir)
+
+            args = [
+                str(venv_python),
+                str(spec_runner_script),
+                "--task",
+                task_description,
+                "--project-dir",
+                project_dir,
+                "--spec-dir",
+                spec_dir,
+            ]
+
+            if auto_approve:
+                args.append("--auto-approve")
+
+            print(f"[IPC] Starting spec creation {self.task_id}: {' '.join(args)}")
+            logger.info(f"Starting spec creation {self.task_id}: {' '.join(args)}")
+
+            # Spawn subprocess
+            self.process = await asyncio.create_subprocess_exec(
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=str(auto_claude_dir),
+                env={
+                    **os.environ,
+                    "PYTHONUNBUFFERED": "1",
+                    "PYTHONIOENCODING": "utf-8",
+                    "PYTHONUTF8": "1",
+                },
+            )
+
+            self.is_running = True
+
+            # Start output streaming tasks
+            asyncio.create_task(self._stream_stdout())
+            asyncio.create_task(self._stream_stderr())
+            asyncio.create_task(self._wait_for_exit())
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Error starting spec creation {self.task_id}: {e}")
+            print(f"Error starting spec creation {self.task_id}: {e}")
+            await self.ws_manager.send_error(self.task_id, str(e))
+            return False
+
+    async def stop(self):
+        """Stop the running subprocess."""
+        if self.process and self.is_running:
+            logger.info(f"Stopping spec creation {self.task_id}")
+            try:
+                self.process.terminate()
+                await asyncio.wait_for(self.process.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    f"Spec creation {self.task_id} did not terminate, killing..."
+                )
+                self.process.kill()
+                await self.process.wait()
+            finally:
+                self.is_running = False
+
+    async def _stream_stdout(self):
+        """Stream stdout to WebSocket clients."""
+        if not self.process or not self.process.stdout:
+            return
+
+        try:
+            while True:
+                line = await self.process.stdout.readline()
+                if not line:
+                    break
+
+                log = line.decode("utf-8", errors="replace")
+                await self.ws_manager.send_log(self.task_id, log)
+
+        except Exception as e:
+            logger.error(
+                f"Error streaming stdout for spec creation {self.task_id}: {e}"
+            )
+
+    async def _stream_stderr(self):
+        """Stream stderr to WebSocket clients."""
+        if not self.process or not self.process.stderr:
+            return
+
+        try:
+            while True:
+                line = await self.process.stderr.readline()
+                if not line:
+                    break
+
+                log = line.decode("utf-8", errors="replace")
+                await self.ws_manager.send_log(self.task_id, log)
+
+        except Exception as e:
+            logger.error(
+                f"Error streaming stderr for spec creation {self.task_id}: {e}"
+            )
+
+    async def _wait_for_exit(self):
+        """Wait for process to exit and send completion event."""
+        if not self.process:
+            return
+
+        try:
+            exit_code = await self.process.wait()
+            self.is_running = False
+
+            logger.info(f"Spec creation {self.task_id} exited with code {exit_code}")
+
+            # Determine status based on exit code
+            if exit_code == 0:
+                status = "spec_ready"
+            else:
+                status = "spec_failed"
+
+            await self.ws_manager.send_status_change(self.task_id, status)
+
+        except Exception as e:
+            logger.error(f"Error waiting for spec creation {self.task_id}: {e}")
+            self.is_running = False
+
+    def _get_venv_python(self, auto_claude_dir: Path) -> Path:
+        """Get Python executable from virtual environment."""
+        venv_dir = auto_claude_dir / ".venv"
+
+        if venv_dir.exists():
+            if sys.platform == "win32":
+                python_exe = venv_dir / "Scripts" / "python.exe"
+            else:
+                python_exe = venv_dir / "bin" / "python"
+
+            if python_exe.exists():
+                return python_exe
+
+        return Path(sys.executable)
+
+
+# Global spec creation process registry
+_spec_processes: dict[str, SpecCreationProcess] = {}
+
+
+async def start_spec_creation(
+    task_id: str,
+    project_dir: str,
+    spec_dir: str,
+    task_description: str,
+    auto_approve: bool,
+    ws_manager,
+) -> dict[str, Any]:
+    """
+    Start spec creation via spec_runner.py.
+
+    Args:
+        task_id: Task identifier
+        project_dir: Project directory
+        spec_dir: Spec directory path
+        task_description: Task description
+        auto_approve: Whether to auto-approve spec
+        ws_manager: WebSocket manager
+
+    Returns:
+        Result dictionary
+    """
+    # Stop existing process if running
+    if task_id in _spec_processes:
+        await _spec_processes[task_id].stop()
+
+    # Create and start new process
+    process = SpecCreationProcess(task_id, ws_manager)
+    _spec_processes[task_id] = process
+
+    success = await process.start(project_dir, spec_dir, task_description, auto_approve)
+
+    return {
+        "success": success,
+        "taskId": task_id,
+        "status": "spec_creating" if success else "failed",
+    }

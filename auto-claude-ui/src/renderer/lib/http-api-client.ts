@@ -194,15 +194,19 @@ export class HttpApiClient implements Partial<ElectronAPI> {
     return this.apiRequest<Task[]>('GET', `/api/tasks?project_id=${projectId}`);
   }
 
-  startTask(taskId: string, options?: TaskStartOptions): void {
+  startTask(taskId: string, options?: TaskStartOptions & { projectId?: string; specId?: string }): void {
     // Fire and forget - progress comes via WebSocket
-    // TODO: Extract projectId and specId from taskId or current context
-    // For now, send minimal data - backend will need to infer from taskId
+    // projectId and specId are passed via enriched options from task-store
     this.apiRequest('POST', '/api/tasks/start', {
       taskId,
-      projectId: '', // TODO: Get from context
-      specId: null, // TODO: Get from taskId
-      options,
+      projectId: options?.projectId || '',
+      specId: options?.specId || null,
+      options: {
+        parallel: options?.parallel,
+        workers: options?.workers,
+        model: options?.model,
+        baseBranch: options?.baseBranch,
+      },
     }).catch(error => {
       console.error('[HttpApiClient] Error starting task:', error);
     });

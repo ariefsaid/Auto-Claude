@@ -444,4 +444,6 @@ export interface TaskStartOptions {
   workers?: number;
   model?: string;
   baseBranch?: string; // Override base branch for worktree creation
+  projectId?: string; // For HTTP API - project identifier
+  specId?: string; // For HTTP API - spec identifier
 }

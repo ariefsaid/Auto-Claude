@@ -334,9 +334,15 @@ export const useTaskStore = create<TaskState>((set, get) => ({
         // Dequeue the task first
         state.dequeueTask(taskId);
 
+        // Look up the task to get projectId and specId
+        const task = state.tasks.find((t) => t.id === taskId || t.specId === taskId);
+
         // Start the task directly (we've already checked slots above)
         console.log(`[processQueue] Starting queued task:`, taskId);
-        window.electronAPI.startTask(taskId);
+        window.electronAPI.startTask(taskId, {
+          projectId: task?.projectId,
+          specId: task?.specId,
+        });
       }
     } catch (error) {
       console.error('Failed to process task queue:', error);
@@ -409,6 +415,14 @@ export async function createTask(
 export async function startTask(taskId: string, options?: { parallel?: boolean; workers?: number }): Promise<void> {
   const state = useTaskStore.getState();
 
+  // Look up the task to get projectId and specId
+  const task = state.tasks.find((t) => t.id === taskId || t.specId === taskId);
+  const enrichedOptions = {
+    ...options,
+    projectId: task?.projectId,
+    specId: task?.specId,
+  };
+
   try {
     // Check if we have available slots
     const runningCount = await getRunningTaskCount();
@@ -421,11 +435,11 @@ export async function startTask(taskId: string, options?: { parallel?: boolean; 
 
     // Slot available - start the task
     console.log(`[startTask] Starting task (${runningCount + 1}/${state.maxParallelTasks}):`, taskId);
-    window.electronAPI.startTask(taskId, options);
+    window.electronAPI.startTask(taskId, enrichedOptions);
   } catch (error) {
     console.error('Failed to check slots before starting task:', error);
     // Fallback: allow task to start if check fails
-    window.electronAPI.startTask(taskId, options);
+    window.electronAPI.startTask(taskId, enrichedOptions);
   }
 }
 

@@ -51,3 +51,6 @@ playwright-report/
 # package-lock.json
 # yarn.lock
 # pnpm-lock.yaml
+
+# Auto Claude data directory
+.auto-claude/
