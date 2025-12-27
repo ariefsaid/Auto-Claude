@@ -132,7 +132,9 @@ async def get_project(project_id: str):
     Returns:
         Project details
     """
-    # TODO: Implement project details retrieval
-    return ProjectResponse(
-        success=True, data={"projectId": project_id, "message": "Project retrieved"}
-    )
+    projects = load_projects()
+    for p in projects:
+        if p.get("id") == project_id:
+            return ProjectResponse(success=True, data=p)
+
+    return ProjectResponse(success=False, error=f"Project not found: {project_id}")
