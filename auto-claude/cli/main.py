@@ -15,6 +15,12 @@ _PARENT_DIR = Path(__file__).parent.parent
 if str(_PARENT_DIR) not in sys.path:
     sys.path.insert(0, str(_PARENT_DIR))
 
+from core.providers.config import (
+    AgentProvider,
+    ProviderConfig,
+    ProviderCredential,
+    parse_provider_credentials,
+)
 from ui import (
     Icons,
     icon,
@@ -25,10 +31,10 @@ from .followup_commands import handle_followup_command
 from .provider_info import (
     AgentProviderType,
     ConfigSource,
+    get_global_credential,
     load_global_settings,
     load_project_env,
     normalize_provider_id,
-    parse_provider_credentials,
 )
 from .qa_commands import (
     handle_qa_command,
@@ -50,9 +56,6 @@ from .workspace_commands import (
     handle_merge_command,
     handle_review_command,
 )
-
-# Type alias for provider configuration
-ProviderConfig = dict[str, str | bool | dict | None]
 
 
 def get_provider_config(
@@ -126,24 +129,53 @@ def get_provider_config(
         is_global_str = oc_project_env.get("AGENT_PROVIDER_IS_GLOBAL", "").lower()
         is_global = is_global_str == "true"
 
-        # Parse provider credentials
-        provider_credentials = parse_provider_credentials(
-            oc_project_env.get("PROVIDER_CREDENTIALS")
-        )
-        if opencode_provider and opencode_provider in provider_credentials:
-            credentials = provider_credentials[opencode_provider]
-            # Check credential reference's isGlobal flag
-            if credentials.get("isGlobal", False):
-                is_global = True
+        # Parse provider credentials - handle global vs project credentials
+        provider_credentials_str = oc_project_env.get("PROVIDER_CREDENTIALS")
+        if provider_credentials_str:
+            try:
+                provider_credentials = parse_provider_credentials(
+                    provider_credentials_str
+                )
+                if opencode_provider and opencode_provider in provider_credentials:
+                    cred_ref = provider_credentials[opencode_provider]
+                    # Check if this is a reference to global credentials
+                    if cred_ref.is_global:
+                        is_global = True
+                        # Load actual credential from global settings
+                        global_cred_data = get_global_credential(
+                            oc_global_settings, opencode_provider
+                        )
+                        if global_cred_data:
+                            # Create proper ProviderCredential from global data
+                            credentials[opencode_provider] = ProviderCredential(
+                                provider=opencode_provider,
+                                api_key=global_cred_data.get("apiKey", ""),
+                                base_url=global_cred_data.get("baseUrl", ""),
+                                default_model=global_cred_data.get("defaultModel", ""),
+                                is_global=True,
+                            )
+                        else:
+                            # No global credential found, use the reference as-is
+                            credentials[opencode_provider] = cred_ref
+                    else:
+                        # Project-level credential - use as-is
+                        credentials[opencode_provider] = cred_ref
+            except ValueError:
+                # Invalid JSON - skip parsing
+                pass
 
-    return {
-        "provider": provider,
-        "source": source,
-        "opencode_provider": opencode_provider,
-        "opencode_model": opencode_model,
-        "is_global": is_global,
-        "credentials": credentials,
-    }
+    # Create AgentProvider enum value
+    agent_provider = (
+        AgentProvider.OPENCODE if provider == "opencode" else AgentProvider.CLAUDE_CODE
+    )
+
+    return ProviderConfig(
+        provider=agent_provider,
+        is_global=is_global,
+        credentials=credentials,
+        opencode_provider=opencode_provider or "",
+        opencode_model=opencode_model or "",
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -490,6 +522,7 @@ def main() -> None:
         skip_qa=args.skip_qa,
         force_bypass_approval=args.force,
         base_branch=args.base_branch,
+        provider=args.provider,
     )
 
 

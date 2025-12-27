@@ -6,15 +6,17 @@ import { EmptyProjectState } from './common/EmptyProjectState';
 import { ErrorDisplay } from './common/ErrorDisplay';
 import { SectionRouter } from './sections/SectionRouter';
 import { createHookProxy } from './utils/hookProxyFactory';
-import type { Project } from '../../../shared/types';
+import type { Project, AppSettings } from '../../../shared/types';
 
-export type ProjectSettingsSection = 'general' | 'claude' | 'linear' | 'github' | 'memory';
+export type ProjectSettingsSection = 'general' | 'claude' | 'provider' | 'linear' | 'github' | 'memory';
 
 interface ProjectSettingsContentProps {
   project: Project | undefined;
   activeSection: ProjectSettingsSection;
   isOpen: boolean;
   onHookReady: (hook: UseProjectSettingsReturn | null) => void;
+  appSettings?: AppSettings | null;
+  onAddGlobalProvider?: (credential: import('@shared/types/provider').ProviderCredential) => void;
 }
 
 /**
@@ -25,7 +27,9 @@ export function ProjectSettingsContent({
   project,
   activeSection,
   isOpen,
-  onHookReady
+  onHookReady,
+  appSettings,
+  onAddGlobalProvider
 }: ProjectSettingsContentProps) {
   // Show empty state if no project selected
   if (!project) {
@@ -45,6 +49,8 @@ export function ProjectSettingsContent({
       activeSection={activeSection}
       isOpen={isOpen}
       onHookReady={onHookReady}
+      appSettings={appSettings}
+      onAddGlobalProvider={onAddGlobalProvider}
     />
   );
 }
@@ -57,12 +63,16 @@ function ProjectSettingsContentInner({
   project,
   activeSection,
   isOpen,
-  onHookReady
+  onHookReady,
+  appSettings,
+  onAddGlobalProvider
 }: {
   project: Project;
   activeSection: ProjectSettingsSection;
   isOpen: boolean;
   onHookReady: (hook: UseProjectSettingsReturn | null) => void;
+  appSettings?: AppSettings | null;
+  onAddGlobalProvider?: (credential: import('@shared/types/provider').ProviderCredential) => void;
 }) {
   const hook = useProjectSettings(project, isOpen);
 
@@ -148,6 +158,8 @@ function ProjectSettingsContentInner({
         handleUpdate={handleUpdate}
         handleClaudeSetup={handleClaudeSetup}
         onOpenLinearImport={() => setShowLinearImportModal(true)}
+        appSettings={appSettings}
+        onAddGlobalProvider={onAddGlobalProvider}
       />
 
       <ErrorDisplay error={error} envError={envError} />

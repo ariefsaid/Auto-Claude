@@ -61,6 +61,7 @@ def handle_build_command(
     skip_qa: bool,
     force_bypass_approval: bool,
     base_branch: str | None = None,
+    provider: str | None = None,
 ) -> None:
     """
     Handle the main build command.
@@ -77,6 +78,7 @@ def handle_build_command(
         skip_qa: Skip automatic QA validation
         force_bypass_approval: Force bypass approval check
         base_branch: Base branch for worktree creation (default: current branch)
+        provider: Provider type override ('claude_code' or 'opencode')
     """
     # Lazy imports to avoid loading heavy modules
     from agent import run_autonomous_agent, sync_plan_to_source
@@ -89,7 +91,11 @@ def handle_build_command(
     from phase_config import get_phase_model
     from qa_loop import run_qa_validation_loop, should_run_qa
 
+    from .main import get_provider_config
     from .utils import print_banner, validate_environment
+
+    # Get provider configuration (CLI flag > .env > global settings > default)
+    provider_config = get_provider_config(project_dir, cli_provider=provider)
 
     # Get the resolved model for the planning phase (first phase of build)
     # This respects task_metadata.json phase configuration from the UI
@@ -231,6 +237,7 @@ def handle_build_command(
                 max_iterations=max_iterations,
                 verbose=verbose,
                 source_spec_dir=source_spec_dir,  # For syncing progress back to main project
+                provider_config=provider_config,  # Provider configuration
             )
         )
         debug_success("run.py", "Agent execution completed")
@@ -305,6 +312,7 @@ def handle_build_command(
             model=model,
             max_iterations=max_iterations,
             verbose=verbose,
+            provider_config=provider_config,
         )
     except Exception as e:
         print(f"\nFatal error: {e}")
@@ -323,6 +331,7 @@ def _handle_build_interrupt(
     model: str,
     max_iterations: int | None,
     verbose: bool,
+    provider_config=None,
 ) -> None:
     """
     Handle keyboard interrupt during build.
@@ -335,6 +344,7 @@ def _handle_build_interrupt(
         model: Model being used
         max_iterations: Maximum iterations
         verbose: Verbose mode flag
+        provider_config: Provider configuration (optional)
     """
     from agent import run_autonomous_agent
 
@@ -441,6 +451,7 @@ def _handle_build_interrupt(
                     model=model,
                     max_iterations=max_iterations,
                     verbose=verbose,
+                    provider_config=provider_config,
                 )
             )
             # Build completed or was interrupted again - exit

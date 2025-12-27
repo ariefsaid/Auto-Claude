@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from core.client import create_client
+from core.client import create_client, create_client_from_config
 from linear_updater import (
     LinearTaskState,
     is_linear_enabled,
@@ -262,17 +262,23 @@ async def run_autonomous_agent(
         phase_thinking_budget = get_phase_thinking_budget(spec_dir, current_phase)
 
         # Create client (fresh context) with phase-specific model and thinking
-        # Note: provider_config is passed through for future multi-provider support
-        # Once create_client is updated to accept provider_config, it will be used here
-        # to create the appropriate client (ClaudeSDKClient or OpenCodeClient)
-        client = create_client(
-            project_dir,
-            spec_dir,
-            phase_model,
-            max_thinking_tokens=phase_thinking_budget,
-            # TODO: Pass provider_config when create_client supports it
-            # provider_config=provider_config,
-        )
+        # Use multi-provider client if provider_config is provided
+        if provider_config:
+            client = create_client_from_config(
+                project_dir,
+                spec_dir,
+                phase_model,
+                agent_type="coder",
+                max_thinking_tokens=phase_thinking_budget,
+                config=provider_config,
+            )
+        else:
+            client = create_client(
+                project_dir,
+                spec_dir,
+                phase_model,
+                max_thinking_tokens=phase_thinking_budget,
+            )
 
         # Generate appropriate prompt
         if first_run:

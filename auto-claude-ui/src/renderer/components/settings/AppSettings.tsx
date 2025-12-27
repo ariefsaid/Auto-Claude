@@ -67,6 +67,7 @@ const appNavItems: NavItem<AppSection>[] = [
 const projectNavItems: NavItem<ProjectSettingsSection>[] = [
   { id: 'general', label: 'General', icon: Settings2, description: 'Auto-Build and agent config' },
   { id: 'claude', label: 'Claude Auth', icon: Key, description: 'Claude authentication' },
+  { id: 'provider', label: 'Agent Provider', icon: Bot, description: 'AI provider configuration' },
   { id: 'linear', label: 'Linear', icon: Zap, description: 'Linear integration' },
   { id: 'github', label: 'GitHub', icon: Github, description: 'GitHub issues sync' },
   { id: 'memory', label: 'Memory', icon: Database, description: 'Graphiti memory backend' }
@@ -153,6 +154,22 @@ export function AppSettingsDialog({ open, onOpenChange, initialSection, initialP
     selectProject(projectId);
   };
 
+  const handleAddGlobalProvider = useCallback(async (credential: import('@shared/types/provider').ProviderCredential) => {
+    // Update settings with new provider credential
+    const updatedProviderCredentials = {
+      ...(settings.providerCredentials || {}),
+      [credential.provider]: credential
+    };
+
+    setSettings({
+      ...settings,
+      providerCredentials: updatedProviderCredentials
+    });
+
+    // Save immediately
+    await saveSettings();
+  }, [settings, setSettings, saveSettings]);
+
   const renderAppSection = () => {
     switch (appSection) {
       case 'appearance':
@@ -182,6 +199,8 @@ export function AppSettingsDialog({ open, onOpenChange, initialSection, initialP
         activeSection={projectSection}
         isOpen={open}
         onHookReady={handleProjectHookReady}
+        appSettings={settings}
+        onAddGlobalProvider={handleAddGlobalProvider}
       />
     );
   };

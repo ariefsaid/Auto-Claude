@@ -166,9 +166,11 @@ class OpenCodeProvider:
         Check if the provider is connected and ready.
 
         Returns:
-            True if the subprocess is running and ready
+            True if the provider has been initialized (subprocess may not be running yet)
         """
-        return self._is_connected and self.subprocess.is_running
+        # We only need to check _is_connected, not subprocess.is_running
+        # because send_query() handles starting/restarting the subprocess
+        return self._is_connected
 
     @property
     def is_security_enabled(self) -> bool:
@@ -232,15 +234,16 @@ class OpenCodeProvider:
 
     async def query(
         self,
-        message: UniversalMessage,
+        message: UniversalMessage | str,
         context: ConversationContext | None = None,
     ) -> UniversalMessage:
         """
         Send a query and get a complete response.
 
-        Extracts text content from UniversalMessage, sends to subprocess,
-        and parses the complete response. Validates any bash tool calls
-        against the security profile before returning.
+        Accepts both UniversalMessage objects and raw strings for compatibility
+        with different calling patterns. Sends to subprocess and parses the
+        complete response. Validates any bash tool calls against the security
+        profile before returning.
 
         Args:
             message: The query message in universal format
@@ -261,8 +264,13 @@ class OpenCodeProvider:
             )
 
         try:
-            # Extract text content for the query
-            text_content = self._extract_text_content(message)
+            # Handle both string and UniversalMessage input
+            # The session layer passes strings, so we need to handle both formats
+            if isinstance(message, str):
+                text_content = message
+            else:
+                # Extract text content from UniversalMessage
+                text_content = self._extract_text_content(message)
 
             # Send query via subprocess
             await self.subprocess.send_query(text_content)
@@ -473,28 +481,16 @@ class OpenCodeProvider:
         """
         Enter async context manager.
 
-        Starts the subprocess and initializes the connection.
+        Initializes the provider for use. The subprocess is started lazily
+        when the first query is sent (via send_query).
 
         Returns:
             The provider instance for use within the context
-
-        Raises:
-            ProviderConnectionError: If subprocess fails to start
         """
-        try:
-            await self.subprocess.start()
-            self._is_connected = True
-            return self
-        except OpenCodeNotInstalledError as e:
-            raise ProviderConnectionError(
-                self.provider_name,
-                "OpenCode CLI not installed. Please install from https://opencode.ai",
-            ) from e
-        except OpenCodeSubprocessError as e:
-            raise ProviderConnectionError(
-                self.provider_name,
-                f"Failed to start OpenCode subprocess: {e!s}",
-            ) from e
+        # Don't start subprocess here - it will be started in send_query()
+        # when we have an actual query to run
+        self._is_connected = True
+        return self
 
     async def __aexit__(
         self,
