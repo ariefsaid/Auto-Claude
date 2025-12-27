@@ -83,6 +83,30 @@ class TaskStopRequest(BaseModel):
     taskId: str
 
 
+class TaskUpdateRequest(BaseModel):
+    """Request to update a task."""
+
+    title: str | None = None
+    description: str | None = None
+    status: str | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class TaskStatusRequest(BaseModel):
+    """Request to update task status."""
+
+    status: str
+    autoStart: bool = False
+
+
+class TaskReviewRequest(BaseModel):
+    """Request to review (approve/reject) a task."""
+
+    action: str  # "approve" or "reject"
+    feedback: str | None = None
+    projectId: str
+
+
 class TaskResponse(BaseModel):
     """Generic task response."""
 
@@ -444,6 +468,507 @@ async def list_tasks(project_id: str):
             tasks.append(task_data)
 
         return TaskResponse(success=True, data=tasks)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def find_spec_dir(project_id: str, spec_id: str) -> tuple[Path | None, str | None]:
+    """
+    Find spec directory for a task.
+
+    Args:
+        project_id: Project identifier
+        spec_id: Spec identifier (can be spec_id or task-{spec_id})
+
+    Returns:
+        Tuple of (spec_dir Path, error message)
+    """
+    project = get_project_by_id(project_id)
+    if not project:
+        return None, f"Project not found: {project_id}"
+
+    project_path = project.get("path")
+    if not project_path:
+        return None, "Project path not configured"
+
+    # Handle both spec_id and task-{spec_id} formats
+    if spec_id.startswith("task-"):
+        # Try to extract spec_id from task_id by looking for spec dirs
+        specs_dir = Path(project_path) / ".auto-claude" / "specs"
+        if specs_dir.exists():
+            # Check task_metadata.json files for matching taskId
+            for spec_dir in specs_dir.iterdir():
+                if spec_dir.is_dir():
+                    metadata_file = spec_dir / "task_metadata.json"
+                    if metadata_file.exists():
+                        try:
+                            with open(metadata_file) as f:
+                                metadata = json.load(f)
+                                if metadata.get("taskId") == spec_id:
+                                    return spec_dir, None
+                        except (OSError, json.JSONDecodeError):
+                            pass
+        return None, f"Spec not found for task: {spec_id}"
+
+    spec_dir = Path(project_path) / ".auto-claude" / "specs" / spec_id
+    if not spec_dir.exists():
+        return None, f"Spec directory not found: {spec_id}"
+
+    return spec_dir, None
+
+
+@router.put("/tasks/{spec_id}", response_model=TaskResponse)
+async def update_task(spec_id: str, request: TaskUpdateRequest, project_id: str):
+    """
+    Update a task's metadata.
+
+    Args:
+        spec_id: Spec identifier
+        request: Update parameters
+        project_id: Project identifier (query param)
+
+    Returns:
+        Updated task data
+    """
+    import time
+
+    try:
+        spec_dir, error = find_spec_dir(project_id, spec_id)
+        if error:
+            return TaskResponse(success=False, error=error)
+
+        # Update task_metadata.json
+        metadata_file = spec_dir / "task_metadata.json"
+        metadata = {}
+        if metadata_file.exists():
+            try:
+                with open(metadata_file) as f:
+                    metadata = json.load(f)
+            except (OSError, json.JSONDecodeError):
+                pass
+
+        # Apply updates
+        if request.title is not None:
+            metadata["title"] = request.title
+        if request.description is not None:
+            metadata["description"] = request.description
+        if request.status is not None:
+            metadata["status"] = request.status
+        if request.metadata is not None:
+            metadata.update(request.metadata)
+
+        metadata["updatedAt"] = int(time.time() * 1000)
+
+        with open(metadata_file, "w") as f:
+            json.dump(metadata, f, indent=2)
+
+        # Also update implementation_plan.json if status changed
+        if request.status is not None:
+            plan_file = spec_dir / "implementation_plan.json"
+            if plan_file.exists():
+                try:
+                    with open(plan_file) as f:
+                        plan = json.load(f)
+                    plan["status"] = request.status
+                    plan["updatedAt"] = int(time.time() * 1000)
+                    with open(plan_file, "w") as f:
+                        json.dump(plan, f, indent=2)
+                except (OSError, json.JSONDecodeError):
+                    pass
+
+        print(f"[Task] Updated task: specId={spec_id}")
+        return TaskResponse(success=True, data=metadata)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/tasks/{spec_id}", response_model=TaskResponse)
+async def delete_task(spec_id: str, project_id: str):
+    """
+    Delete a task and its spec directory.
+
+    Args:
+        spec_id: Spec identifier
+        project_id: Project identifier (query param)
+
+    Returns:
+        Success/error response
+    """
+    import shutil
+
+    try:
+        spec_dir, error = find_spec_dir(project_id, spec_id)
+        if error:
+            return TaskResponse(success=False, error=error)
+
+        # Remove the spec directory
+        shutil.rmtree(spec_dir)
+
+        print(f"[Task] Deleted task: specId={spec_id}")
+        return TaskResponse(success=True, data={"deleted": spec_id})
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/tasks/{spec_id}/status", response_model=TaskResponse)
+async def update_task_status(spec_id: str, request: TaskStatusRequest, project_id: str):
+    """
+    Update task status with optional auto-start.
+
+    Args:
+        spec_id: Spec identifier
+        request: Status update parameters
+        project_id: Project identifier (query param)
+
+    Returns:
+        Updated task data
+    """
+    import time
+
+    try:
+        spec_dir, error = find_spec_dir(project_id, spec_id)
+        if error:
+            return TaskResponse(success=False, error=error)
+
+        valid_statuses = [
+            "backlog",
+            "ready",
+            "in_progress",
+            "review",
+            "done",
+            "failed",
+            "blocked",
+        ]
+        if request.status not in valid_statuses:
+            return TaskResponse(
+                success=False,
+                error=f"Invalid status: {request.status}. Valid: {valid_statuses}",
+            )
+
+        # Update implementation_plan.json
+        plan_file = spec_dir / "implementation_plan.json"
+        plan = {}
+        if plan_file.exists():
+            try:
+                with open(plan_file) as f:
+                    plan = json.load(f)
+            except (OSError, json.JSONDecodeError):
+                pass
+
+        plan["status"] = request.status
+        plan["updatedAt"] = int(time.time() * 1000)
+
+        with open(plan_file, "w") as f:
+            json.dump(plan, f, indent=2)
+
+        # Also update task_metadata.json
+        metadata_file = spec_dir / "task_metadata.json"
+        if metadata_file.exists():
+            try:
+                with open(metadata_file) as f:
+                    metadata = json.load(f)
+                metadata["status"] = request.status
+                metadata["updatedAt"] = int(time.time() * 1000)
+                with open(metadata_file, "w") as f:
+                    json.dump(metadata, f, indent=2)
+            except (OSError, json.JSONDecodeError):
+                pass
+
+        print(f"[Task] Updated status: specId={spec_id}, status={request.status}")
+
+        # Auto-start if requested and status is ready/in_progress
+        if request.autoStart and request.status in ["ready", "in_progress"]:
+            # Get task ID from metadata
+            task_id = None
+            if metadata_file.exists():
+                try:
+                    with open(metadata_file) as f:
+                        metadata = json.load(f)
+                        task_id = metadata.get("taskId", f"task-{spec_id}")
+                except (OSError, json.JSONDecodeError):
+                    task_id = f"task-{spec_id}"
+
+            if task_id:
+                from api.server import ws_manager
+
+                project = get_project_by_id(project_id)
+                project_path = project.get("path") if project else None
+
+                if project_path:
+                    spec_file = spec_dir / "spec.md"
+                    if spec_file.exists():
+                        result = await start_task_execution(
+                            task_id=task_id,
+                            project_dir=project_path,
+                            spec_id=spec_id,
+                            options={},
+                            ws_manager=ws_manager,
+                        )
+                        return TaskResponse(
+                            success=True,
+                            data={"status": request.status, "started": True, **result},
+                        )
+
+        return TaskResponse(success=True, data={"status": request.status})
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/tasks/{spec_id}/recover", response_model=TaskResponse)
+async def recover_task(spec_id: str, project_id: str):
+    """
+    Recover a stuck task by analyzing its state and resetting if needed.
+
+    Args:
+        spec_id: Spec identifier
+        project_id: Project identifier (query param)
+
+    Returns:
+        Recovery result
+    """
+    import time
+
+    try:
+        spec_dir, error = find_spec_dir(project_id, spec_id)
+        if error:
+            return TaskResponse(success=False, error=error)
+
+        # Read implementation plan to analyze state
+        plan_file = spec_dir / "implementation_plan.json"
+        plan = {}
+        if plan_file.exists():
+            try:
+                with open(plan_file) as f:
+                    plan = json.load(f)
+            except (OSError, json.JSONDecodeError):
+                pass
+
+        # Analyze subtasks to determine actual status
+        subtasks = plan.get("subtasks", [])
+        completed_count = sum(1 for s in subtasks if s.get("status") == "done")
+        failed_count = sum(1 for s in subtasks if s.get("status") == "failed")
+        in_progress_count = sum(1 for s in subtasks if s.get("status") == "in_progress")
+
+        # Determine new status based on subtask states
+        new_status = "backlog"
+        if len(subtasks) == 0:
+            new_status = "backlog"
+        elif completed_count == len(subtasks):
+            new_status = "review"
+        elif failed_count > 0:
+            new_status = "failed"
+        elif in_progress_count > 0 or completed_count > 0:
+            new_status = "in_progress"
+        else:
+            new_status = "ready"
+
+        # Reset any in_progress subtasks to pending
+        for subtask in subtasks:
+            if subtask.get("status") == "in_progress":
+                subtask["status"] = "pending"
+
+        plan["status"] = new_status
+        plan["subtasks"] = subtasks
+        plan["updatedAt"] = int(time.time() * 1000)
+        plan["recoveredAt"] = int(time.time() * 1000)
+
+        with open(plan_file, "w") as f:
+            json.dump(plan, f, indent=2)
+
+        print(
+            f"[Task] Recovered task: specId={spec_id}, newStatus={new_status}, "
+            f"completed={completed_count}/{len(subtasks)}"
+        )
+
+        return TaskResponse(
+            success=True,
+            data={
+                "specId": spec_id,
+                "previousStatus": plan.get("status"),
+                "newStatus": new_status,
+                "subtaskStats": {
+                    "total": len(subtasks),
+                    "completed": completed_count,
+                    "failed": failed_count,
+                    "inProgress": in_progress_count,
+                },
+            },
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/tasks/{spec_id}/review", response_model=TaskResponse)
+async def review_task(spec_id: str, request: TaskReviewRequest):
+    """
+    Approve or reject a completed task.
+
+    Approve: Marks as done, generates QA report
+    Reject: Writes QA_FIX_REQUEST.md, can restart QA agent
+
+    Args:
+        spec_id: Spec identifier
+        request: Review parameters
+
+    Returns:
+        Review result
+    """
+    import time
+
+    try:
+        spec_dir, error = find_spec_dir(request.projectId, spec_id)
+        if error:
+            return TaskResponse(success=False, error=error)
+
+        if request.action not in ["approve", "reject"]:
+            return TaskResponse(
+                success=False, error="Invalid action. Must be 'approve' or 'reject'"
+            )
+
+        # Read current plan
+        plan_file = spec_dir / "implementation_plan.json"
+        plan = {}
+        if plan_file.exists():
+            try:
+                with open(plan_file) as f:
+                    plan = json.load(f)
+            except (OSError, json.JSONDecodeError):
+                pass
+
+        if request.action == "approve":
+            # Mark as done
+            plan["status"] = "done"
+            plan["reviewedAt"] = int(time.time() * 1000)
+            plan["reviewResult"] = "approved"
+
+            with open(plan_file, "w") as f:
+                json.dump(plan, f, indent=2)
+
+            # Write QA report
+            qa_report = spec_dir / "qa_report.md"
+            report_content = f"""# QA Report
+
+## Status: APPROVED
+
+**Reviewed at:** {time.strftime("%Y-%m-%d %H:%M:%S")}
+
+## Summary
+Task has been reviewed and approved.
+
+{f"## Feedback{chr(10)}{request.feedback}" if request.feedback else ""}
+"""
+            qa_report.write_text(report_content)
+
+            print(f"[Task] Approved task: specId={spec_id}")
+            return TaskResponse(
+                success=True,
+                data={"specId": spec_id, "status": "done", "action": "approved"},
+            )
+
+        else:  # reject
+            # Mark for QA fix
+            plan["status"] = "in_progress"
+            plan["reviewedAt"] = int(time.time() * 1000)
+            plan["reviewResult"] = "rejected"
+            plan["qaFixNeeded"] = True
+
+            with open(plan_file, "w") as f:
+                json.dump(plan, f, indent=2)
+
+            # Write QA fix request
+            fix_request = spec_dir / "QA_FIX_REQUEST.md"
+            fix_content = f"""# QA Fix Request
+
+## Status: NEEDS FIXES
+
+**Requested at:** {time.strftime("%Y-%m-%d %H:%M:%S")}
+
+## Issues to Address
+
+{request.feedback or "Please review and fix the identified issues."}
+
+## Instructions
+1. Review the feedback above
+2. Make necessary changes
+3. Run tests to verify fixes
+4. Mark as ready for re-review
+"""
+            fix_request.write_text(fix_content)
+
+            print(f"[Task] Rejected task: specId={spec_id}")
+            return TaskResponse(
+                success=True,
+                data={
+                    "specId": spec_id,
+                    "status": "in_progress",
+                    "action": "rejected",
+                    "fixRequestPath": str(fix_request),
+                },
+            )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/tasks/{spec_id}/logs", response_model=TaskResponse)
+async def get_task_logs(spec_id: str, project_id: str, limit: int = 100):
+    """
+    Get task execution logs.
+
+    Args:
+        spec_id: Spec identifier
+        project_id: Project identifier (query param)
+        limit: Maximum number of log entries to return
+
+    Returns:
+        Task logs
+    """
+    try:
+        spec_dir, error = find_spec_dir(project_id, spec_id)
+        if error:
+            return TaskResponse(success=False, error=error)
+
+        # Read task_logs.json
+        logs_file = spec_dir / "task_logs.json"
+        logs = []
+        if logs_file.exists():
+            try:
+                with open(logs_file) as f:
+                    logs_data = json.load(f)
+                    if isinstance(logs_data, list):
+                        logs = logs_data[-limit:]
+                    elif isinstance(logs_data, dict):
+                        # Handle structured log format
+                        logs = logs_data.get("entries", [])[-limit:]
+            except (OSError, json.JSONDecodeError):
+                pass
+
+        # Also check for console output logs
+        console_log = spec_dir / "console.log"
+        console_output = ""
+        if console_log.exists():
+            try:
+                console_output = console_log.read_text()
+                # Take last N lines
+                lines = console_output.split("\n")
+                console_output = "\n".join(lines[-limit:])
+            except OSError:
+                pass
+
+        return TaskResponse(
+            success=True,
+            data={
+                "specId": spec_id,
+                "logs": logs,
+                "consoleOutput": console_output,
+                "logsPath": str(logs_file),
+            },
+        )
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
