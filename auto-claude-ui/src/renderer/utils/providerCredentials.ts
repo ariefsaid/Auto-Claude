@@ -228,6 +228,8 @@ export function validateApiKeyFormat(
   const normalizedId = normalizeProviderId(providerId);
 
   // Known API key patterns
+  // Note: Only validate patterns for providers with well-known, documented key formats
+  // Z.ai GLM and other providers may use various key formats
   const patterns: Record<string, { pattern: RegExp; message: string }> = {
     openai: {
       pattern: /^sk-/,
@@ -236,11 +238,6 @@ export function validateApiKeyFormat(
     anthropic: {
       pattern: /^sk-ant-/,
       message: 'Anthropic API keys should start with "sk-ant-"',
-    },
-    // Z.ai uses various prefixes
-    'zai-glm': {
-      pattern: /^zai-/,
-      message: 'Z.ai API keys should start with "zai-"',
     },
   };
 

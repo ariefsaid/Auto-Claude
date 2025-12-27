@@ -72,8 +72,8 @@ export const SUGGESTED_PROVIDER_TEMPLATES: SuggestedProviderTemplate[] = [
     displayName: 'Z.ai GLM',
     normalizedId: 'zai-glm',
     defaultModel: 'glm-4',
-    apiKeyPattern: 'zai-*',
-    apiKeyPlaceholder: 'zai-...',
+    apiKeyPattern: '*',
+    apiKeyPlaceholder: 'Enter API key...',
   },
   {
     displayName: 'OpenRouter',
@@ -169,7 +169,7 @@ export const PROVIDER_INFO: Record<string, ProviderInfo> = {
     requiresApiKey: true,
     defaultModel: 'glm-4',
     supportedModels: ['glm-4', 'glm-4-flash', 'glm-4.7'],
-    apiKeyPattern: '^zai-[A-Za-z0-9]+$',
+    apiKeyPattern: '.*',
   },
   openrouter: {
     id: 'openrouter',
