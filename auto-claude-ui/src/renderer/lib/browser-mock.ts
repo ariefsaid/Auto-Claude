@@ -147,10 +147,28 @@ export async function initBrowserMock(): Promise<void> {
 
       // Create HTTP client and assign to window.electronAPI
       const httpClient = createHttpApiClient();
-      (window as Window & { electronAPI: any }).electronAPI = {
-        ...browserMockAPI, // Spread mocks for unimplemented methods
-        ...httpClient, // Override with real HTTP implementation
-      };
+
+      // Merge browserMockAPI with httpClient methods
+      // Note: Class methods are on the prototype, so we need to explicitly bind them
+      const electronAPI: any = { ...browserMockAPI };
+
+      // Bind HTTP client methods (class methods are on prototype, not own properties)
+      const methodNames = [
+        'getTasks', 'startTask', 'stopTask',
+        'onTaskProgress', 'onTaskError', 'onTaskLog',
+        'onTaskStatusChange', 'onTaskExecutionProgress',
+        'getProjects', 'addProject',
+        'getSettings', 'saveSettings',
+        'getAppVersion', 'disconnect'
+      ];
+
+      for (const method of methodNames) {
+        if (typeof (httpClient as any)[method] === 'function') {
+          electronAPI[method] = (httpClient as any)[method].bind(httpClient);
+        }
+      }
+
+      (window as Window & { electronAPI: any }).electronAPI = electronAPI;
       return;
     }
   } catch (error) {
@@ -162,5 +180,5 @@ export async function initBrowserMock(): Promise<void> {
   (window as Window & { electronAPI: ElectronAPI }).electronAPI = browserMockAPI;
 }
 
-// Auto-initialize (async)
-initBrowserMock();
+// Export promise for main.tsx to await before rendering
+export const browserMockReady = initBrowserMock();

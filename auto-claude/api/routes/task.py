@@ -34,7 +34,7 @@ class TaskResponse(BaseModel):
     """Generic task response."""
 
     success: bool
-    data: dict[str, Any] | None = None
+    data: dict[str, Any] | list[dict[str, Any]] | None = None
     error: str | None = None
 
 
@@ -155,14 +155,10 @@ async def list_tasks(project_id: str):
         # from api.utils.ipc_bridge import list_project_tasks
         # result = await list_project_tasks(project_id)
 
-        # Placeholder implementation
+        # Return empty array directly as data (not wrapped in object)
         return TaskResponse(
             success=True,
-            data={
-                "projectId": project_id,
-                "tasks": [],
-                "message": "Task list retrieved",
-            },
+            data=[],  # Empty task list for now
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

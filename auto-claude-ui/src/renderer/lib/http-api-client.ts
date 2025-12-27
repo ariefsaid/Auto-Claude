@@ -282,15 +282,20 @@ export class HttpApiClient implements Partial<ElectronAPI> {
   }
 
   // =========================================================================
-  // Placeholder/Unimplemented Methods
+  // Settings Operations
   // =========================================================================
-
-  // These methods return mock responses to prevent crashes.
-  // TODO: Implement remaining ElectronAPI methods as needed
 
   async getSettings(): Promise<IPCResult<any>> {
     return this.apiRequest('GET', '/api/settings');
   }
+
+  async saveSettings(settings: Partial<any>): Promise<IPCResult<any>> {
+    return this.apiRequest('POST', '/api/settings', { settings });
+  }
+
+  // =========================================================================
+  // App Info
+  // =========================================================================
 
   async getAppVersion(): Promise<string> {
     return '1.0.0-browser-live';
