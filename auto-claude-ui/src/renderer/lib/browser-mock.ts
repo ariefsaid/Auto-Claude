@@ -159,6 +159,7 @@ export async function initBrowserMock(): Promise<void> {
         'onTaskStatusChange', 'onTaskExecutionProgress',
         'getProjects', 'addProject',
         'getSettings', 'saveSettings',
+        'getProjectEnv', 'updateProjectEnv',
         'getAppVersion', 'disconnect'
       ];
 

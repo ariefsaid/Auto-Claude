@@ -294,6 +294,18 @@ export class HttpApiClient implements Partial<ElectronAPI> {
   }
 
   // =========================================================================
+  // Project Environment Operations
+  // =========================================================================
+
+  async getProjectEnv(projectId: string): Promise<IPCResult<any>> {
+    return this.apiRequest('GET', `/api/projects/${projectId}/env`);
+  }
+
+  async updateProjectEnv(projectId: string, config: Partial<any>): Promise<IPCResult<any>> {
+    return this.apiRequest('PUT', `/api/projects/${projectId}/env`, { config });
+  }
+
+  // =========================================================================
   // App Info
   // =========================================================================
 
