@@ -20,6 +20,202 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def get_app_data_dir() -> Path:
+    """Get the application data directory based on platform."""
+    if os.name == "nt":  # Windows
+        base = Path(os.environ.get("APPDATA", Path.home()))
+        return base / "auto-claude-ui"
+    elif sys.platform == "darwin":  # macOS
+        return Path.home() / "Library" / "Application Support" / "auto-claude-ui"
+    else:  # Linux
+        return Path.home() / ".config" / "auto-claude-ui"
+
+
+def parse_env_file(content: str) -> dict[str, str]:
+    """Parse .env file content into a dictionary."""
+    result = {}
+    for line in content.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip()
+            # Remove quotes if present
+            if (value.startswith('"') and value.endswith('"')) or (
+                value.startswith("'") and value.endswith("'")
+            ):
+                value = value[1:-1]
+            result[key] = value
+    return result
+
+
+def load_global_settings() -> dict[str, Any]:
+    """Load global settings from disk."""
+    settings_path = get_app_data_dir() / "settings.json"
+    if settings_path.exists():
+        try:
+            with open(settings_path) as f:
+                return json.load(f)
+        except (OSError, json.JSONDecodeError):
+            pass
+    return {}
+
+
+def load_projects() -> list[dict[str, Any]]:
+    """Load projects from disk."""
+    projects_path = get_app_data_dir() / "projects.json"
+    if projects_path.exists():
+        try:
+            with open(projects_path) as f:
+                return json.load(f)
+        except (OSError, json.JSONDecodeError):
+            pass
+    return []
+
+
+def get_project_by_path(project_path: str) -> dict[str, Any] | None:
+    """Find project by path."""
+    projects = load_projects()
+    for p in projects:
+        if p.get("path") == project_path:
+            return p
+    return None
+
+
+def get_combined_env(project_dir: str) -> dict[str, str]:
+    """
+    Get combined environment variables for subprocess.
+
+    Merges:
+    1. Current process environment (os.environ)
+    2. Global settings (settings.json)
+    3. Project-specific .env file
+
+    Project-specific values take precedence over global settings.
+
+    Args:
+        project_dir: Project directory path
+
+    Returns:
+        Combined environment dictionary
+    """
+    env = dict(os.environ)
+
+    # Load global settings
+    global_settings = load_global_settings()
+
+    # Apply global settings first
+    if global_settings.get("globalClaudeOAuthToken"):
+        env["CLAUDE_CODE_OAUTH_TOKEN"] = global_settings["globalClaudeOAuthToken"]
+
+    if global_settings.get("globalOpenAIApiKey"):
+        env["OPENAI_API_KEY"] = global_settings["globalOpenAIApiKey"]
+
+    if global_settings.get("selectedAgentProvider"):
+        env["AGENT_PROVIDER"] = global_settings["selectedAgentProvider"]
+
+    if global_settings.get("globalOpencodeProvider"):
+        env["OPENCODE_PROVIDER"] = global_settings["globalOpencodeProvider"]
+
+    if global_settings.get("globalOpencodeModel"):
+        env["OPENCODE_MODEL"] = global_settings["globalOpencodeModel"]
+
+    # Extract provider/model from providerCredentials if not set directly
+    provider_credentials = global_settings.get("providerCredentials", {})
+    if provider_credentials:
+        env["PROVIDER_CREDENTIALS"] = json.dumps(provider_credentials)
+
+        # If OPENCODE_PROVIDER not set, try to get from first credential
+        if not env.get("OPENCODE_PROVIDER"):
+            for cred_key, cred_data in provider_credentials.items():
+                if isinstance(cred_data, dict):
+                    provider = cred_data.get("provider", cred_key)
+                    env["OPENCODE_PROVIDER"] = provider
+
+                    # Also get the model if available
+                    if not env.get("OPENCODE_MODEL") and cred_data.get("defaultModel"):
+                        env["OPENCODE_MODEL"] = cred_data["defaultModel"]
+
+                    # Get API key for this provider
+                    if cred_data.get("apiKey"):
+                        # Set provider-specific API key env var
+                        # e.g., ZHIPU_API_KEY for zai-glm
+                        provider_upper = provider.upper().replace("-", "_")
+                        env[f"{provider_upper}_API_KEY"] = cred_data["apiKey"]
+                        # Also set generic OPENCODE_API_KEY
+                        env["OPENCODE_API_KEY"] = cred_data["apiKey"]
+
+                    break  # Use first configured provider
+
+    # Find project and load its .env file (overrides global settings)
+    project = get_project_by_path(project_dir)
+    if project:
+        auto_build_path = project.get("autoBuildPath")
+        if auto_build_path:
+            env_path = Path(project_dir) / auto_build_path / ".env"
+            if env_path.exists():
+                try:
+                    content = env_path.read_text()
+                    project_env = parse_env_file(content)
+                    # Project .env overrides global settings
+                    env.update(project_env)
+                    logger.info(f"Loaded project .env from {env_path}")
+                except OSError as e:
+                    logger.warning(f"Failed to read project .env: {e}")
+
+    # Always set Python encoding vars
+    env["PYTHONUNBUFFERED"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+
+    return env
+
+
+def get_model_from_settings(project_dir: str) -> str | None:
+    """
+    Get the configured model from settings.
+
+    Checks project .env first, then global settings.
+
+    Args:
+        project_dir: Project directory path
+
+    Returns:
+        Model identifier or None
+    """
+    # Check project .env first
+    project = get_project_by_path(project_dir)
+    if project:
+        auto_build_path = project.get("autoBuildPath")
+        if auto_build_path:
+            env_path = Path(project_dir) / auto_build_path / ".env"
+            if env_path.exists():
+                try:
+                    content = env_path.read_text()
+                    project_env = parse_env_file(content)
+                    if project_env.get("OPENCODE_MODEL"):
+                        return project_env["OPENCODE_MODEL"]
+                    if project_env.get("AUTO_BUILD_MODEL"):
+                        return project_env["AUTO_BUILD_MODEL"]
+                except OSError:
+                    pass
+
+    # Check global settings
+    global_settings = load_global_settings()
+    if global_settings.get("globalOpencodeModel"):
+        return global_settings["globalOpencodeModel"]
+
+    # Check providerCredentials for defaultModel
+    provider_credentials = global_settings.get("providerCredentials", {})
+    for cred_data in provider_credentials.values():
+        if isinstance(cred_data, dict) and cred_data.get("defaultModel"):
+            return cred_data["defaultModel"]
+
+    return None
+
+
 class TaskProcess:
     """Manages a Python subprocess for task execution."""
 
@@ -81,21 +277,28 @@ class TaskProcess:
                 if options.get("qaOnly"):
                     args.append("--qa")
 
+            # If no model specified in options, get from settings
+            if not options or not options.get("model"):
+                model = get_model_from_settings(project_dir)
+                if model:
+                    args.extend(["--model", model])
+
+            # Get combined environment (global settings + project .env)
+            combined_env = get_combined_env(project_dir)
+
             print(f"[IPC] Starting task {self.task_id}: {' '.join(args)}")
+            print(
+                f"[IPC] Environment: AGENT_PROVIDER={combined_env.get('AGENT_PROVIDER', 'not set')}, OPENCODE_PROVIDER={combined_env.get('OPENCODE_PROVIDER', 'not set')}, OPENCODE_MODEL={combined_env.get('OPENCODE_MODEL', 'not set')}"
+            )
             logger.info(f"Starting task {self.task_id}: {' '.join(args)}")
 
-            # Spawn subprocess
+            # Spawn subprocess with combined environment
             self.process = await asyncio.create_subprocess_exec(
                 *args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(auto_claude_dir),
-                env={
-                    **os.environ,
-                    "PYTHONUNBUFFERED": "1",
-                    "PYTHONIOENCODING": "utf-8",
-                    "PYTHONUTF8": "1",
-                },
+                env=combined_env,
             )
 
             self.is_running = True
@@ -382,21 +585,27 @@ class SpecCreationProcess:
             if auto_approve:
                 args.append("--auto-approve")
 
+            # Get model from settings and pass to spec_runner
+            model = get_model_from_settings(project_dir)
+            if model:
+                args.extend(["--model", model])
+
+            # Get combined environment (global settings + project .env)
+            combined_env = get_combined_env(project_dir)
+
             print(f"[IPC] Starting spec creation {self.task_id}: {' '.join(args)}")
+            print(
+                f"[IPC] Environment: AGENT_PROVIDER={combined_env.get('AGENT_PROVIDER', 'not set')}, OPENCODE_PROVIDER={combined_env.get('OPENCODE_PROVIDER', 'not set')}, OPENCODE_MODEL={combined_env.get('OPENCODE_MODEL', 'not set')}"
+            )
             logger.info(f"Starting spec creation {self.task_id}: {' '.join(args)}")
 
-            # Spawn subprocess
+            # Spawn subprocess with combined environment
             self.process = await asyncio.create_subprocess_exec(
                 *args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(auto_claude_dir),
-                env={
-                    **os.environ,
-                    "PYTHONUNBUFFERED": "1",
-                    "PYTHONIOENCODING": "utf-8",
-                    "PYTHONUTF8": "1",
-                },
+                env=combined_env,
             )
 
             self.is_running = True
