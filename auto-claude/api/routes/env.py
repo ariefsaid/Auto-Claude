@@ -387,3 +387,61 @@ async def update_project_env(project_id: str, request: UpdateEnvRequest):
         return EnvResponse(success=True)
     except Exception as e:
         return EnvResponse(success=False, error=str(e))
+
+
+@router.get("/env/check-auth", response_model=EnvResponse)
+async def check_claude_auth():
+    """
+    Check if Claude OAuth token is configured and valid.
+
+    Checks both global settings and environment variables.
+
+    Returns:
+        Authentication status
+    """
+    import subprocess
+
+    auth_status = {
+        "isConfigured": False,
+        "source": None,
+        "tokenType": None,
+        "isValid": False,
+        "error": None,
+    }
+
+    # Check global settings first
+    global_settings = load_settings()
+    global_token = global_settings.get("globalClaudeOAuthToken")
+
+    if global_token:
+        auth_status["isConfigured"] = True
+        auth_status["source"] = "global_settings"
+        auth_status["tokenType"] = "oauth"
+
+    # Check environment variable
+    env_token = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
+    if env_token:
+        auth_status["isConfigured"] = True
+        auth_status["source"] = "environment"
+        auth_status["tokenType"] = "oauth"
+
+    # Try to validate by running claude --version (quick check)
+    if auth_status["isConfigured"]:
+        try:
+            result = subprocess.run(
+                ["claude", "--version"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode == 0:
+                auth_status["isValid"] = True
+                auth_status["claudeVersion"] = result.stdout.strip()
+        except FileNotFoundError:
+            auth_status["error"] = "Claude CLI not found"
+        except subprocess.TimeoutExpired:
+            auth_status["error"] = "Claude CLI timeout"
+        except Exception as e:
+            auth_status["error"] = str(e)
+
+    return EnvResponse(success=True, data=auth_status)

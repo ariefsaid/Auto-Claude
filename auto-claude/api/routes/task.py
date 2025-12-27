@@ -382,6 +382,29 @@ async def stop_task(request: TaskStopRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/tasks/running", response_model=TaskResponse)
+async def get_running_tasks():
+    """
+    Get count and list of currently running tasks.
+
+    Returns:
+        Running task count and IDs
+    """
+    from api.utils.ipc_bridge import get_running_tasks
+
+    try:
+        running = get_running_tasks()
+        return TaskResponse(
+            success=True,
+            data={
+                "count": len(running),
+                "tasks": running,
+            },
+        )
+    except Exception as e:
+        return TaskResponse(success=False, error=str(e))
+
+
 @router.get("/tasks/{task_id}", response_model=TaskResponse)
 async def get_task(task_id: str):
     """
@@ -913,6 +936,102 @@ Task has been reviewed and approved.
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/tasks/{spec_id}/archive", response_model=TaskResponse)
+async def archive_task(spec_id: str, project_id: str):
+    """
+    Archive a completed task.
+
+    Moves the task to archived status in metadata.
+
+    Args:
+        spec_id: Spec identifier
+        project_id: Project identifier (query param)
+
+    Returns:
+        Archive result
+    """
+    import time
+
+    try:
+        spec_dir, error = find_spec_dir(project_id, spec_id)
+        if error:
+            return TaskResponse(success=False, error=error)
+
+        # Update task_metadata.json
+        metadata_file = spec_dir / "task_metadata.json"
+        metadata = {}
+        if metadata_file.exists():
+            try:
+                with open(metadata_file) as f:
+                    metadata = json.load(f)
+            except (OSError, json.JSONDecodeError):
+                pass
+
+        metadata["archived"] = True
+        metadata["archivedAt"] = int(time.time() * 1000)
+        metadata["updatedAt"] = int(time.time() * 1000)
+
+        with open(metadata_file, "w") as f:
+            json.dump(metadata, f, indent=2)
+
+        print(f"[Task] Archived task: specId={spec_id}")
+        return TaskResponse(
+            success=True,
+            data={"specId": spec_id, "archived": True},
+        )
+
+    except Exception as e:
+        return TaskResponse(success=False, error=str(e))
+
+
+@router.post("/tasks/{spec_id}/unarchive", response_model=TaskResponse)
+async def unarchive_task(spec_id: str, project_id: str):
+    """
+    Unarchive a task.
+
+    Restores the task from archived status.
+
+    Args:
+        spec_id: Spec identifier
+        project_id: Project identifier (query param)
+
+    Returns:
+        Unarchive result
+    """
+    import time
+
+    try:
+        spec_dir, error = find_spec_dir(project_id, spec_id)
+        if error:
+            return TaskResponse(success=False, error=error)
+
+        # Update task_metadata.json
+        metadata_file = spec_dir / "task_metadata.json"
+        metadata = {}
+        if metadata_file.exists():
+            try:
+                with open(metadata_file) as f:
+                    metadata = json.load(f)
+            except (OSError, json.JSONDecodeError):
+                pass
+
+        metadata["archived"] = False
+        metadata.pop("archivedAt", None)
+        metadata["updatedAt"] = int(time.time() * 1000)
+
+        with open(metadata_file, "w") as f:
+            json.dump(metadata, f, indent=2)
+
+        print(f"[Task] Unarchived task: specId={spec_id}")
+        return TaskResponse(
+            success=True,
+            data={"specId": spec_id, "archived": False},
+        )
+
+    except Exception as e:
+        return TaskResponse(success=False, error=str(e))
 
 
 @router.get("/tasks/{spec_id}/logs", response_model=TaskResponse)

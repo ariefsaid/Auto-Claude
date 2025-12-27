@@ -528,6 +528,25 @@ def get_task_status(task_id: str) -> dict[str, Any]:
         return {"success": False, "taskId": task_id, "error": "Task not found"}
 
 
+def get_running_tasks() -> list[dict[str, Any]]:
+    """
+    Get list of currently running tasks.
+
+    Returns:
+        List of running task info
+    """
+    running = []
+    for task_id, process in _task_processes.items():
+        if process.is_running:
+            running.append(
+                {
+                    "taskId": task_id,
+                    "status": "running",
+                }
+            )
+    return running
+
+
 class SpecCreationProcess:
     """Manages a Python subprocess for spec creation via spec_runner.py."""
 

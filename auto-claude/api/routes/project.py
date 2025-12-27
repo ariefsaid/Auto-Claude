@@ -64,6 +64,14 @@ class AddProjectRequest(BaseModel):
     projectPath: str
 
 
+class UpdateProjectRequest(BaseModel):
+    """Request body for updating a project."""
+
+    name: str | None = None
+    autoBuildPath: str | None = None
+    settings: dict[str, Any] | None = None
+
+
 @router.get("/projects", response_model=ProjectResponse)
 async def list_projects():
     """
@@ -136,5 +144,136 @@ async def get_project(project_id: str):
     for p in projects:
         if p.get("id") == project_id:
             return ProjectResponse(success=True, data=p)
+
+    return ProjectResponse(success=False, error=f"Project not found: {project_id}")
+
+
+@router.delete("/projects/{project_id}", response_model=ProjectResponse)
+async def remove_project(project_id: str):
+    """
+    Remove a project from the list.
+
+    Note: This does NOT delete the project files, only removes it from tracking.
+
+    Args:
+        project_id: Project identifier
+
+    Returns:
+        Success/error response
+    """
+    projects = load_projects()
+
+    for i, p in enumerate(projects):
+        if p.get("id") == project_id:
+            removed = projects.pop(i)
+            save_projects(projects)
+            print(f"[Projects] Removed project: {removed.get('name')}")
+            return ProjectResponse(
+                success=True,
+                data={"removed": project_id, "name": removed.get("name")},
+            )
+
+    return ProjectResponse(success=False, error=f"Project not found: {project_id}")
+
+
+@router.put("/projects/{project_id}", response_model=ProjectResponse)
+async def update_project(project_id: str, request: UpdateProjectRequest):
+    """
+    Update project settings.
+
+    Args:
+        project_id: Project identifier
+        request: Update parameters
+
+    Returns:
+        Updated project
+    """
+    import time
+
+    projects = load_projects()
+
+    for p in projects:
+        if p.get("id") == project_id:
+            # Apply updates
+            if request.name is not None:
+                p["name"] = request.name
+            if request.autoBuildPath is not None:
+                p["autoBuildPath"] = request.autoBuildPath
+            if request.settings is not None:
+                if "settings" not in p:
+                    p["settings"] = {}
+                p["settings"].update(request.settings)
+
+            p["updatedAt"] = int(time.time() * 1000)
+
+            save_projects(projects)
+            print(f"[Projects] Updated project: {p.get('name')}")
+            return ProjectResponse(success=True, data=p)
+
+    return ProjectResponse(success=False, error=f"Project not found: {project_id}")
+
+
+@router.post("/projects/{project_id}/init", response_model=ProjectResponse)
+async def init_project(project_id: str):
+    """
+    Initialize auto-claude in a project.
+
+    Creates the .auto-claude directory structure.
+
+    Args:
+        project_id: Project identifier
+
+    Returns:
+        Initialization result
+    """
+    import time
+
+    projects = load_projects()
+
+    for p in projects:
+        if p.get("id") == project_id:
+            project_path = p.get("path")
+            if not project_path:
+                return ProjectResponse(
+                    success=False, error="Project path not configured"
+                )
+
+            # Create .auto-claude directory structure
+            auto_claude_dir = Path(project_path) / ".auto-claude"
+            specs_dir = auto_claude_dir / "specs"
+
+            try:
+                specs_dir.mkdir(parents=True, exist_ok=True)
+
+                # Create .gitignore if not exists
+                gitignore = auto_claude_dir / ".gitignore"
+                if not gitignore.exists():
+                    gitignore.write_text(
+                        "# Auto Claude data\n"
+                        "*.log\n"
+                        "console.log\n"
+                        "task_logs.json\n"
+                    )
+
+                # Update project with autoBuildPath
+                p["autoBuildPath"] = ".auto-claude"
+                p["updatedAt"] = int(time.time() * 1000)
+                save_projects(projects)
+
+                print(f"[Projects] Initialized project: {p.get('name')}")
+                return ProjectResponse(
+                    success=True,
+                    data={
+                        "projectId": project_id,
+                        "autoBuildPath": ".auto-claude",
+                        "specsDir": str(specs_dir),
+                        "initialized": True,
+                    },
+                )
+
+            except OSError as e:
+                return ProjectResponse(
+                    success=False, error=f"Failed to create directory: {e}"
+                )
 
     return ProjectResponse(success=False, error=f"Project not found: {project_id}")

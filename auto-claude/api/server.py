@@ -24,7 +24,17 @@ if str(_PARENT_DIR) not in sys.path:
     sys.path.insert(0, str(_PARENT_DIR))
 
 import uvicorn
-from api.routes import env, project, provider, settings, spec, task, workspace
+from api.routes import (
+    context,
+    env,
+    git,
+    project,
+    provider,
+    settings,
+    spec,
+    task,
+    workspace,
+)
 from api.websocket.manager import WebSocketManager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -112,6 +122,8 @@ app.include_router(settings.router, prefix="/api", tags=["settings"])
 app.include_router(env.router, prefix="/api", tags=["env"])
 app.include_router(provider.router, prefix="/api", tags=["provider"])
 app.include_router(spec.router, prefix="/api", tags=["spec"])
+app.include_router(git.router, prefix="/api", tags=["git"])
+app.include_router(context.router, prefix="/api", tags=["context"])
 
 
 def parse_args():
