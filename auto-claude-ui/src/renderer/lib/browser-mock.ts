@@ -4,9 +4,15 @@
  *
  * This module aggregates all mock implementations from separate modules
  * for better code organization and maintainability.
+ *
+ * Runtime Modes:
+ * 1. Electron IPC - Desktop app with real backend (existing)
+ * 2. HTTP Live API - Browser with FastAPI backend (NEW)
+ * 3. Browser Mocks - Browser with fake data (existing, for offline dev)
  */
 
 import type { ElectronAPI } from '../../shared/types';
+import { createHttpApiClient } from './http-api-client';
 import {
   projectMock,
   taskMock,
@@ -112,14 +118,49 @@ const browserMockAPI: ElectronAPI = {
 };
 
 /**
- * Initialize browser mock if not running in Electron
+ * Initialize browser API (mocks or HTTP client) if not running in Electron.
+ *
+ * Detection logic:
+ * 1. Check if window.electronAPI exists → Electron IPC mode
+ * 2. Try HTTP API health check → HTTP Live API mode
+ * 3. Fall back to mocks → Browser Mock mode
  */
-export function initBrowserMock(): void {
-  if (!isElectron) {
-    console.warn('%c[Browser Mock] Initializing mock electronAPI for browser preview', 'color: #f0ad4e; font-weight: bold;');
-    (window as Window & { electronAPI: ElectronAPI }).electronAPI = browserMockAPI;
+export async function initBrowserMock(): Promise<void> {
+  // 1. Check if Electron
+  if (isElectron) {
+    console.log('%c[Runtime] Using Electron IPC mode', 'color: #4caf50; font-weight: bold;');
+    return; // Use real IPC
   }
+
+  // 2. Try HTTP API (NEW PORT 8766)
+  try {
+    const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8766';
+    const response = await fetch(`${API_URL}/health`, {
+      method: 'GET',
+      signal: AbortSignal.timeout(2000), // 2 second timeout
+    });
+
+    if (response.ok) {
+      console.log('%c[Runtime] Using HTTP API mode', 'color: #2196f3; font-weight: bold;', {
+        apiUrl: API_URL,
+      });
+
+      // Create HTTP client and assign to window.electronAPI
+      const httpClient = createHttpApiClient();
+      (window as Window & { electronAPI: any }).electronAPI = {
+        ...browserMockAPI, // Spread mocks for unimplemented methods
+        ...httpClient, // Override with real HTTP implementation
+      };
+      return;
+    }
+  } catch (error) {
+    console.warn('[Runtime] API server not available, falling back to mock mode');
+  }
+
+  // 3. Fall back to mocks
+  console.warn('%c[Browser Mock] Initializing mock electronAPI for browser preview', 'color: #f0ad4e; font-weight: bold;');
+  (window as Window & { electronAPI: ElectronAPI }).electronAPI = browserMockAPI;
 }
 
-// Auto-initialize
+// Auto-initialize (async)
 initBrowserMock();
