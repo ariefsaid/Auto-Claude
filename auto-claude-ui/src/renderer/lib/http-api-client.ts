@@ -128,6 +128,41 @@ export class HttpApiClient implements Partial<ElectronAPI> {
   }
 
   /**
+   * Map backend status to valid UI TaskStatus.
+   * Backend sends statuses like: spec_creating, spec_ready, spec_failed, started, completed, failed
+   * UI Kanban columns expect: backlog, in_progress, ai_review, human_review, done
+   */
+  private mapBackendStatusToUI(backendStatus: string): TaskStatus {
+    const statusMap: Record<string, TaskStatus> = {
+      // Spec creation statuses
+      'spec_creating': 'in_progress',
+      'spec_ready': 'in_progress',  // Spec done, task will start execution
+      'spec_failed': 'backlog',     // Failed, user can retry
+
+      // Task execution statuses
+      'started': 'in_progress',
+      'running': 'in_progress',
+      'completed': 'ai_review',     // Completed tasks go to AI review
+      'failed': 'backlog',          // Failed tasks go back to backlog
+      'stopped': 'backlog',         // Stopped tasks go back to backlog
+
+      // Already valid UI statuses (pass through)
+      'backlog': 'backlog',
+      'in_progress': 'in_progress',
+      'ai_review': 'ai_review',
+      'human_review': 'human_review',
+      'done': 'done',
+    };
+
+    const mappedStatus = statusMap[backendStatus];
+    if (!mappedStatus) {
+      console.warn(`[HttpApiClient] Unknown backend status: ${backendStatus}, defaulting to 'in_progress'`);
+      return 'in_progress';
+    }
+    return mappedStatus;
+  }
+
+  /**
    * Handle incoming WebSocket messages.
    */
   private handleWebSocketMessage(message: any): void {
@@ -146,9 +181,13 @@ export class HttpApiClient implements Partial<ElectronAPI> {
         this.taskErrorCallbacks.forEach(cb => cb(taskId, message.error));
         break;
 
-      case 'status-change':
-        this.taskStatusChangeCallbacks.forEach(cb => cb(taskId, message.status));
+      case 'status-change': {
+        // Map backend status to valid UI status
+        const uiStatus = this.mapBackendStatusToUI(message.status);
+        console.log(`[HttpApiClient] Status change: ${message.status} -> ${uiStatus}`);
+        this.taskStatusChangeCallbacks.forEach(cb => cb(taskId, uiStatus));
         break;
+      }
 
       case 'execution-progress':
         this.taskExecutionProgressCallbacks.forEach(cb => cb(taskId, message.progress));
@@ -559,6 +598,22 @@ export class HttpApiClient implements Partial<ElectronAPI> {
   async getProviderModels(provider?: string): Promise<IPCResult<any>> {
     const url = provider ? `/api/provider/models?provider=${provider}` : '/api/provider/models';
     return this.apiRequest('GET', url);
+  }
+
+  /**
+   * Get available models from OpenCode CLI.
+   *
+   * Fetches the list of provider/model pairs from `opencode models` command.
+   * No API keys needed - OpenCode already has credentials configured.
+   *
+   * @returns Promise with models array containing { provider, model, fullId }
+   */
+  async getOpenCodeModels(): Promise<IPCResult<{
+    models: Array<{ provider: string; model: string; fullId: string }>;
+    providers: string[];
+    count: number;
+  }>> {
+    return this.apiRequest('GET', '/api/providers/opencode/models');
   }
 
   // =========================================================================

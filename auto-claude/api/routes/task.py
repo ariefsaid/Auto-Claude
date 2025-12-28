@@ -58,6 +58,83 @@ def get_project_by_id(project_id: str) -> dict[str, Any] | None:
     return None
 
 
+def build_complete_task_data(
+    spec_id: str,
+    project_id: str,
+    spec_dir: Path,
+    status: str | None = None,
+) -> dict[str, Any]:
+    """
+    Build complete task data with all required fields.
+
+    Args:
+        spec_id: Spec identifier
+        project_id: Project identifier
+        spec_dir: Path to spec directory
+        status: Optional status override
+
+    Returns:
+        Complete task object with all required fields
+    """
+    import time
+
+    task_data = {
+        "id": f"task-{spec_id}",
+        "specId": spec_id,
+        "projectId": project_id,
+        "title": spec_id,
+        "description": "",
+        "status": status or "backlog",
+        "subtasks": [],
+        "logs": [],
+        "createdAt": None,
+        "updatedAt": int(time.time() * 1000),
+    }
+
+    # Read from task_metadata.json
+    metadata_file = spec_dir / "task_metadata.json"
+    if metadata_file.exists():
+        try:
+            with open(metadata_file) as f:
+                metadata = json.load(f)
+                task_data["title"] = metadata.get("title", spec_id)
+                task_data["description"] = metadata.get("description", "")
+                task_data["createdAt"] = metadata.get("createdAt")
+                task_data["updatedAt"] = metadata.get(
+                    "updatedAt", int(time.time() * 1000)
+                )
+                if status is None:
+                    task_data["status"] = metadata.get("status", "backlog")
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    # Read from implementation_plan.json for status and subtasks
+    plan_file = spec_dir / "implementation_plan.json"
+    if plan_file.exists():
+        try:
+            with open(plan_file) as f:
+                plan = json.load(f)
+                if status is None and "status" in plan:
+                    task_data["status"] = plan["status"]
+                if "createdAt" in plan and task_data["createdAt"] is None:
+                    task_data["createdAt"] = plan["createdAt"]
+                # Support both flat subtasks and nested phases structure
+                if plan.get("subtasks"):
+                    task_data["subtasks"] = plan["subtasks"]
+                elif plan.get("phases"):
+                    # Extract subtasks from all phases
+                    all_subtasks = []
+                    for phase in plan.get("phases", []):
+                        for subtask in phase.get("subtasks", []):
+                            all_subtasks.append(subtask)
+                    if all_subtasks:
+                        task_data["subtasks"] = all_subtasks
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    return task_data
+
+
 # Request/Response Models
 class TaskCreateRequest(BaseModel):
     """Request to create a new task."""
@@ -230,8 +307,12 @@ async def create_task(request: TaskCreateRequest):
                 "specId": spec_id,
                 "projectId": request.projectId,
                 "title": request.title,
-                "description": request.description,
+                "description": request.description or "",
                 "status": "backlog",
+                "subtasks": [],
+                "logs": [],
+                "createdAt": task_metadata["createdAt"],
+                "updatedAt": task_metadata["updatedAt"],
                 "specDir": str(spec_dir),
             },
         )
@@ -457,12 +538,19 @@ async def list_tasks(project_id: str):
                 continue
 
             spec_id = spec_dir.name
+
+            # Initialize with all required fields
             task_data = {
                 "id": f"task-{spec_id}",
                 "specId": spec_id,
                 "projectId": project_id,
                 "title": spec_id,
+                "description": "",
                 "status": "backlog",
+                "subtasks": [],
+                "logs": [],
+                "createdAt": None,
+                "updatedAt": None,
             }
 
             # Try to read spec.md for title
@@ -474,10 +562,15 @@ async def list_tasks(project_id: str):
                     match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
                     if match:
                         task_data["title"] = match.group(1)
+
+                    # Get file timestamps
+                    stat = spec_file.stat()
+                    task_data["createdAt"] = int(stat.st_ctime * 1000)
+                    task_data["updatedAt"] = int(stat.st_mtime * 1000)
                 except OSError:
                     pass
 
-            # Try to read implementation_plan.json for status
+            # Try to read implementation_plan.json for status and subtasks
             plan_file = spec_dir / "implementation_plan.json"
             if plan_file.exists():
                 try:
@@ -485,6 +578,40 @@ async def list_tasks(project_id: str):
                         plan = json.load(f)
                         if plan.get("status"):
                             task_data["status"] = plan["status"]
+                        # Support both flat subtasks and nested phases structure
+                        if plan.get("subtasks"):
+                            task_data["subtasks"] = plan["subtasks"]
+                        elif plan.get("phases"):
+                            # Extract subtasks from all phases
+                            all_subtasks = []
+                            for phase in plan.get("phases", []):
+                                for subtask in phase.get("subtasks", []):
+                                    all_subtasks.append(subtask)
+                            if all_subtasks:
+                                task_data["subtasks"] = all_subtasks
+                        if plan.get("description"):
+                            task_data["description"] = plan["description"]
+                        if plan.get("createdAt"):
+                            task_data["createdAt"] = plan["createdAt"]
+                        if plan.get("updatedAt"):
+                            task_data["updatedAt"] = plan["updatedAt"]
+                except (OSError, json.JSONDecodeError):
+                    pass
+
+            # Try to read task_metadata.json
+            metadata_file = spec_dir / "task_metadata.json"
+            if metadata_file.exists():
+                try:
+                    with open(metadata_file) as f:
+                        metadata = json.load(f)
+                        if metadata.get("description"):
+                            task_data["description"] = metadata["description"]
+                        if metadata.get("createdAt"):
+                            task_data["createdAt"] = metadata["createdAt"]
+                        if metadata.get("updatedAt"):
+                            task_data["updatedAt"] = metadata["updatedAt"]
+                        if metadata.get("archived"):
+                            continue  # Skip archived tasks
                 except (OSError, json.JSONDecodeError):
                     pass
 
@@ -601,7 +728,10 @@ async def update_task(spec_id: str, request: TaskUpdateRequest, project_id: str)
                     pass
 
         print(f"[Task] Updated task: specId={spec_id}")
-        return TaskResponse(success=True, data=metadata)
+
+        # Return complete task data
+        task_data = build_complete_task_data(spec_id, project_id, spec_dir)
+        return TaskResponse(success=True, data=task_data)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -730,12 +860,62 @@ async def update_task_status(spec_id: str, request: TaskStatusRequest, project_i
                             options={},
                             ws_manager=ws_manager,
                         )
-                        return TaskResponse(
-                            success=True,
-                            data={"status": request.status, "started": True, **result},
-                        )
 
-        return TaskResponse(success=True, data={"status": request.status})
+                        # Return complete task object when auto-starting
+                        task_data = {
+                            "id": f"task-{spec_id}",
+                            "specId": spec_id,
+                            "projectId": project_id,
+                            "title": spec_id,
+                            "description": "",
+                            "status": request.status,
+                            "subtasks": [],
+                            "logs": [],
+                            "createdAt": plan.get("createdAt"),
+                            "updatedAt": plan.get("updatedAt", int(time.time() * 1000)),
+                            "started": True,
+                        }
+
+                        if metadata_file.exists():
+                            try:
+                                with open(metadata_file) as f:
+                                    metadata = json.load(f)
+                                    task_data["title"] = metadata.get("title", spec_id)
+                                    task_data["description"] = metadata.get(
+                                        "description", ""
+                                    )
+                                    task_data["createdAt"] = metadata.get("createdAt")
+                            except (OSError, json.JSONDecodeError):
+                                pass
+
+                        return TaskResponse(success=True, data=task_data)
+
+        # Return complete task object with all required fields
+        task_data = {
+            "id": f"task-{spec_id}",
+            "specId": spec_id,
+            "projectId": project_id,
+            "title": spec_id,
+            "description": "",
+            "status": request.status,
+            "subtasks": [],
+            "logs": [],
+            "createdAt": plan.get("createdAt"),
+            "updatedAt": plan.get("updatedAt", int(time.time() * 1000)),
+        }
+
+        # Read from metadata if available
+        if metadata_file.exists():
+            try:
+                with open(metadata_file) as f:
+                    metadata = json.load(f)
+                    task_data["title"] = metadata.get("title", spec_id)
+                    task_data["description"] = metadata.get("description", "")
+                    task_data["createdAt"] = metadata.get("createdAt")
+            except (OSError, json.JSONDecodeError):
+                pass
+
+        return TaskResponse(success=True, data=task_data)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -807,20 +987,19 @@ async def recover_task(spec_id: str, project_id: str):
             f"completed={completed_count}/{len(subtasks)}"
         )
 
-        return TaskResponse(
-            success=True,
-            data={
-                "specId": spec_id,
-                "previousStatus": plan.get("status"),
-                "newStatus": new_status,
-                "subtaskStats": {
-                    "total": len(subtasks),
-                    "completed": completed_count,
-                    "failed": failed_count,
-                    "inProgress": in_progress_count,
-                },
+        # Build complete task data with recovery stats
+        task_data = build_complete_task_data(spec_id, project_id, spec_dir, new_status)
+        task_data["recovery"] = {
+            "previousStatus": plan.get("status"),
+            "subtaskStats": {
+                "total": len(subtasks),
+                "completed": completed_count,
+                "failed": failed_count,
+                "inProgress": in_progress_count,
             },
-        )
+        }
+
+        return TaskResponse(success=True, data=task_data)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -888,10 +1067,17 @@ Task has been reviewed and approved.
             qa_report.write_text(report_content)
 
             print(f"[Task] Approved task: specId={spec_id}")
-            return TaskResponse(
-                success=True,
-                data={"specId": spec_id, "status": "done", "action": "approved"},
+
+            # Build complete task data
+            task_data = build_complete_task_data(
+                spec_id, request.projectId, spec_dir, "done"
             )
+            task_data["review"] = {
+                "action": "approved",
+                "reviewedAt": plan.get("reviewedAt"),
+            }
+
+            return TaskResponse(success=True, data=task_data)
 
         else:  # reject
             # Mark for QA fix
@@ -924,15 +1110,18 @@ Task has been reviewed and approved.
             fix_request.write_text(fix_content)
 
             print(f"[Task] Rejected task: specId={spec_id}")
-            return TaskResponse(
-                success=True,
-                data={
-                    "specId": spec_id,
-                    "status": "in_progress",
-                    "action": "rejected",
-                    "fixRequestPath": str(fix_request),
-                },
+
+            # Build complete task data
+            task_data = build_complete_task_data(
+                spec_id, request.projectId, spec_dir, "in_progress"
             )
+            task_data["review"] = {
+                "action": "rejected",
+                "reviewedAt": plan.get("reviewedAt"),
+                "fixRequestPath": str(fix_request),
+            }
+
+            return TaskResponse(success=True, data=task_data)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -977,10 +1166,13 @@ async def archive_task(spec_id: str, project_id: str):
             json.dump(metadata, f, indent=2)
 
         print(f"[Task] Archived task: specId={spec_id}")
-        return TaskResponse(
-            success=True,
-            data={"specId": spec_id, "archived": True},
-        )
+
+        # Build complete task data
+        task_data = build_complete_task_data(spec_id, project_id, spec_dir)
+        task_data["archived"] = True
+        task_data["archivedAt"] = metadata.get("archivedAt")
+
+        return TaskResponse(success=True, data=task_data)
 
     except Exception as e:
         return TaskResponse(success=False, error=str(e))
@@ -1025,10 +1217,12 @@ async def unarchive_task(spec_id: str, project_id: str):
             json.dump(metadata, f, indent=2)
 
         print(f"[Task] Unarchived task: specId={spec_id}")
-        return TaskResponse(
-            success=True,
-            data={"specId": spec_id, "archived": False},
-        )
+
+        # Build complete task data
+        task_data = build_complete_task_data(spec_id, project_id, spec_dir)
+        task_data["archived"] = False
+
+        return TaskResponse(success=True, data=task_data)
 
     except Exception as e:
         return TaskResponse(success=False, error=str(e))

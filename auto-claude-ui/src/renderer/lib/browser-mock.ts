@@ -177,7 +177,7 @@ export async function initBrowserMock(): Promise<void> {
         // Provider operations
         'getProviderStatus', 'validateProvider', 'testProvider',
         'getConfiguredProviders', 'addProviderToGlobal',
-        'removeGlobalProvider', 'getProviderModels',
+        'removeGlobalProvider', 'getProviderModels', 'getOpenCodeModels',
         // Environment operations
         'checkClaudeAuth',
         // Spec operations

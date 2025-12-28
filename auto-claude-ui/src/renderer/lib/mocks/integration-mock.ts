@@ -208,5 +208,50 @@ export const integrationMock = {
         { login: 'another-org', avatarUrl: 'https://avatars.githubusercontent.com/u/2?v=4' }
       ]
     }
+  }),
+
+  // Provider Operations
+  getOpenCodeModels: async () => ({
+    success: true,
+    data: {
+      models: [],
+      providers: [],
+      count: 0
+    }
+  }),
+
+  getProviderStatus: async () => ({
+    success: true,
+    data: {
+      provider: 'claude_code' as const,
+      source: 'default' as const,
+      isConfigured: false,
+      errors: ['Not available in browser mock'],
+      credentialSources: {}
+    }
+  }),
+
+  validateProvider: async () => ({
+    success: true,
+    data: {
+      isValid: false,
+      errors: ['Not available in browser mock'],
+      warnings: []
+    }
+  }),
+
+  addGlobalProvider: async () => ({
+    success: false,
+    error: 'Not available in browser mock'
+  }),
+
+  getConfiguredProviders: async () => ({
+    success: true,
+    data: []
+  }),
+
+  removeGlobalProvider: async () => ({
+    success: false,
+    error: 'Not available in browser mock'
   })
 };

@@ -435,10 +435,16 @@ export async function startTask(taskId: string, options?: { parallel?: boolean; 
 
     // Slot available - start the task
     console.log(`[startTask] Starting task (${runningCount + 1}/${state.maxParallelTasks}):`, taskId);
+
+    // Immediately update local state to 'in_progress' for instant UI feedback
+    // WebSocket will provide subsequent status updates
+    state.updateTaskStatus(taskId, 'in_progress');
+
     window.electronAPI.startTask(taskId, enrichedOptions);
   } catch (error) {
     console.error('Failed to check slots before starting task:', error);
     // Fallback: allow task to start if check fails
+    state.updateTaskStatus(taskId, 'in_progress');
     window.electronAPI.startTask(taskId, enrichedOptions);
   }
 }

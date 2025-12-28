@@ -545,6 +545,13 @@ export interface ElectronAPI {
   checkGitStatus: (projectPath: string) => Promise<IPCResult<GitStatus>>;
   initializeGit: (projectPath: string) => Promise<IPCResult<InitializationResult>>;
 
+  // OpenCode model operations
+  getOpenCodeModels: () => Promise<IPCResult<{
+    models: Array<{ provider: string; model: string; fullId: string }>;
+    providers: string[];
+    count: number;
+  }>>;
+
   // Ollama model detection operations
   checkOllamaStatus: (baseUrl?: string) => Promise<IPCResult<{
     running: boolean;

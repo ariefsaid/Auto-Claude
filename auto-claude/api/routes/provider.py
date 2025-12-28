@@ -576,6 +576,91 @@ async def get_provider_models(provider: str):
     )
 
 
+@router.get("/providers/opencode/models", response_model=ProviderResponse)
+async def get_opencode_models():
+    """
+    Fetch available models from OpenCode CLI.
+
+    Runs `opencode models` command and parses the output to get
+    provider/model pairs. This returns the actual models available
+    in the user's OpenCode installation with correct provider IDs.
+
+    No API keys needed - OpenCode already has credentials configured.
+    """
+    import shutil
+    import subprocess
+
+    # Check if opencode is installed
+    opencode_path = shutil.which("opencode")
+    if not opencode_path:
+        return ProviderResponse(
+            success=False,
+            error="OpenCode CLI not found. Please install OpenCode first.",
+        )
+
+    try:
+        # Run opencode models command
+        result = subprocess.run(
+            ["opencode", "models"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        if result.returncode != 0:
+            return ProviderResponse(
+                success=False,
+                error=f"OpenCode models command failed: {result.stderr.strip()}",
+            )
+
+        # Parse output - each line is "provider/model"
+        models = []
+        providers_seen: set[str] = set()
+
+        for line in result.stdout.strip().split("\n"):
+            line = line.strip()
+            if not line or "/" not in line:
+                continue
+
+            # Parse provider/model format
+            provider, model = line.split("/", 1)
+            provider = provider.strip()
+            model = model.strip()
+
+            if provider and model:
+                models.append(
+                    {
+                        "provider": provider,
+                        "model": model,
+                        "fullId": f"{provider}/{model}",
+                    }
+                )
+                providers_seen.add(provider)
+
+        # Group models by provider for easier UI consumption
+        providers = sorted(providers_seen)
+
+        return ProviderResponse(
+            success=True,
+            data={
+                "models": models,
+                "providers": providers,
+                "count": len(models),
+            },
+        )
+
+    except subprocess.TimeoutExpired:
+        return ProviderResponse(
+            success=False,
+            error="OpenCode models command timed out",
+        )
+    except Exception as e:
+        return ProviderResponse(
+            success=False,
+            error=f"Error fetching OpenCode models: {str(e)}",
+        )
+
+
 # =============================================================================
 # Helper Functions
 # =============================================================================
