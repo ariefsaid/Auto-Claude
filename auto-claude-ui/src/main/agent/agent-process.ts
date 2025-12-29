@@ -78,6 +78,10 @@ export class AgentProcessManager {
 
   /**
    * Get project-specific environment variables based on project settings
+   *
+   * Reads from project.settings (stored in projects.json) for:
+   * - Agent provider configuration (multi-provider support)
+   * - Graphiti MCP integration
    */
   private getProjectEnvVars(projectPath: string): Record<string, string> {
     const env: Record<string, string> = {};
@@ -87,6 +91,18 @@ export class AgentProcessManager {
     const project = projects.find((p) => p.path === projectPath);
 
     if (project?.settings) {
+      // Agent Provider Configuration (multi-provider support)
+      // These settings are stored in project.settings, not in .env file
+      if (project.settings.agentProvider) {
+        env['AGENT_PROVIDER'] = project.settings.agentProvider;
+      }
+      if (project.settings.opencodeProvider) {
+        env['OPENCODE_PROVIDER'] = project.settings.opencodeProvider;
+      }
+      if (project.settings.opencodeModel) {
+        env['OPENCODE_MODEL'] = project.settings.opencodeModel;
+      }
+
       // Graphiti MCP integration
       if (project.settings.graphitiMcpEnabled) {
         const graphitiUrl = project.settings.graphitiMcpUrl || 'http://localhost:8000/mcp/';

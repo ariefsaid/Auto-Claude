@@ -1,4 +1,4 @@
-import type { Project, ProjectSettings as ProjectSettingsType, AutoBuildVersionInfo, ProjectEnvConfig, LinearSyncStatus, GitHubSyncStatus } from '../../../../shared/types';
+import type { Project, ProjectSettings as ProjectSettingsType, AutoBuildVersionInfo, ProjectEnvConfig, LinearSyncStatus, GitHubSyncStatus, AppSettings } from '../../../../shared/types';
 import { SettingsSection } from '../SettingsSection';
 import { GeneralSettings } from '../../project-settings/GeneralSettings';
 import { EnvironmentSettings } from '../../project-settings/EnvironmentSettings';
@@ -6,6 +6,7 @@ import { SecuritySettings } from '../../project-settings/SecuritySettings';
 import { LinearIntegration } from '../integrations/LinearIntegration';
 import { GitHubIntegration } from '../integrations/GitHubIntegration';
 import { InitializationGuard } from '../common/InitializationGuard';
+import { AgentProviderSection } from '../AgentProviderSection';
 import type { ProjectSettingsSection } from '../ProjectSettingsContent';
 
 interface SectionRouterProps {
@@ -38,6 +39,8 @@ interface SectionRouterProps {
   handleUpdate: () => Promise<void>;
   handleClaudeSetup: () => Promise<void>;
   onOpenLinearImport: () => void;
+  appSettings?: AppSettings | null;
+  onAddGlobalProvider?: (credential: import('@shared/types/provider').ProviderCredential) => void;
 }
 
 /**
@@ -73,7 +76,9 @@ export function SectionRouter({
   handleInitialize,
   handleUpdate,
   handleClaudeSetup,
-  onOpenLinearImport
+  onOpenLinearImport,
+  appSettings,
+  onAddGlobalProvider
 }: SectionRouterProps) {
   switch (activeSection) {
     case 'general':
@@ -118,6 +123,45 @@ export function SectionRouter({
               setShowClaudeToken={setShowClaudeToken}
               expanded={true}
               onToggle={() => {}}
+            />
+          </InitializationGuard>
+        </SettingsSection>
+      );
+
+    case 'provider':
+      return (
+        <SettingsSection
+          title="Agent Provider"
+          description="Configure which AI provider to use for coding tasks"
+        >
+          <InitializationGuard
+            initialized={!!project.autoBuildPath}
+            title="Agent Provider"
+            description="Select and configure your AI provider"
+          >
+            <AgentProviderSection
+              agentProvider={settings?.agentProvider || envConfig?.agentProvider || 'claude_code'}
+              onAgentProviderChange={(provider) =>
+                setSettings((prev) => ({ ...prev, agentProvider: provider }))
+              }
+              isGlobal={envConfig?.agentProviderIsGlobal ?? false}
+              onGlobalChange={(isGlobal) =>
+                updateEnvConfig({ agentProviderIsGlobal: isGlobal })
+              }
+              opencodeProvider={settings?.opencodeProvider || envConfig?.opencodeProvider}
+              onOpencodeProviderChange={(provider) =>
+                setSettings((prev) => ({ ...prev, opencodeProvider: provider }))
+              }
+              opencodeModel={settings?.opencodeModel || envConfig?.opencodeModel}
+              onOpencodeModelChange={(model) =>
+                setSettings((prev) => ({ ...prev, opencodeModel: model }))
+              }
+              providerCredentials={envConfig?.providerCredentials}
+              onProviderCredentialsChange={(credentials) =>
+                updateEnvConfig({ providerCredentials: credentials })
+              }
+              appSettings={appSettings}
+              onAddGlobalProvider={onAddGlobalProvider}
             />
           </InitializationGuard>
         </SettingsSection>
