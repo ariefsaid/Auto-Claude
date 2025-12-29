@@ -26,6 +26,12 @@ export interface ProjectSettings {
   graphitiMcpUrl?: string;
   /** Main branch name for worktree creation (default: auto-detected or 'main') */
   mainBranch?: string;
+  /** Agent provider type: claude_code or opencode */
+  agentProvider?: AgentProviderType;
+  /** OpenCode provider ID (from `opencode models`, e.g., "zai-coding-plan") */
+  opencodeProvider?: string;
+  /** OpenCode model override */
+  opencodeModel?: string;
 }
 
 export interface NotificationSettings {

@@ -71,7 +71,9 @@ except ImportError:
 AgentProviderType = Literal["claude_code", "opencode"]
 
 # Configuration source types
-ConfigSource = Literal["cli_flag", "project_env", "global_settings", "default"]
+ConfigSource = Literal[
+    "cli_flag", "current_env", "project_env", "global_settings", "default"
+]
 
 # Credential source types
 CredentialSource = Literal["global", "project", "missing"]

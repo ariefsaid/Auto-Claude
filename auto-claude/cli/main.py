@@ -63,7 +63,7 @@ def get_provider_config(
     cli_provider: str | None = None,
 ) -> ProviderConfig:
     """
-    Get provider configuration with priority: CLI flag > Project .env > Global settings > Default.
+    Get provider configuration with priority: CLI flag > Current env > Project .env > Global settings > Default.
 
     Args:
         project_dir: Project root directory
@@ -72,7 +72,7 @@ def get_provider_config(
     Returns:
         ProviderConfig dictionary with:
         - provider: Agent provider type ('claude_code' or 'opencode')
-        - source: Configuration source ('cli_flag', 'project_env', 'global_settings', 'default')
+        - source: Configuration source ('cli_flag', 'current_env', 'project_env', 'global_settings', 'default')
         - opencode_provider: OpenCode LLM provider ID (if using opencode)
         - opencode_model: OpenCode model override (if using opencode)
         - is_global: Whether using global credentials
@@ -90,7 +90,15 @@ def get_provider_config(
         provider = cli_provider  # type: ignore
         source = "cli_flag"
 
-    # Priority 2: Project .env
+    # Priority 2: Current environment variables (for subprocess handoff from spec_runner)
+    # This allows parent processes to pass provider config via environment
+    if source == "default":
+        current_env_provider = os.environ.get("AGENT_PROVIDER", "").strip().lower()
+        if current_env_provider in ("claude_code", "opencode"):
+            provider = current_env_provider  # type: ignore
+            source = "current_env"
+
+    # Priority 3: Project .env
     if source == "default":
         project_env = load_project_env(project_dir)
         env_provider = project_env.get("AGENT_PROVIDER", "").strip().lower()
@@ -114,23 +122,33 @@ def get_provider_config(
         oc_project_env = load_project_env(project_dir)
         oc_global_settings = load_global_settings()
 
-        # Get OpenCode provider and model
-        opencode_provider = oc_project_env.get("OPENCODE_PROVIDER", "").strip() or None
+        # Get OpenCode provider and model - check current env first (for subprocess handoff)
+        opencode_provider = os.environ.get("OPENCODE_PROVIDER", "").strip() or None
+        if not opencode_provider:
+            opencode_provider = (
+                oc_project_env.get("OPENCODE_PROVIDER", "").strip() or None
+            )
         if not opencode_provider:
             opencode_provider = oc_global_settings.get("globalOpencodeProvider") or None
         if opencode_provider:
             opencode_provider = normalize_provider_id(opencode_provider)
 
-        opencode_model = oc_project_env.get("OPENCODE_MODEL", "").strip() or None
+        opencode_model = os.environ.get("OPENCODE_MODEL", "").strip() or None
+        if not opencode_model:
+            opencode_model = oc_project_env.get("OPENCODE_MODEL", "").strip() or None
         if not opencode_model:
             opencode_model = oc_global_settings.get("globalOpencodeModel") or None
 
-        # Check if using global credentials
-        is_global_str = oc_project_env.get("AGENT_PROVIDER_IS_GLOBAL", "").lower()
+        # Check if using global credentials - check current env first
+        is_global_str = os.environ.get("AGENT_PROVIDER_IS_GLOBAL", "").lower()
+        if not is_global_str:
+            is_global_str = oc_project_env.get("AGENT_PROVIDER_IS_GLOBAL", "").lower()
         is_global = is_global_str == "true"
 
-        # Parse provider credentials - handle global vs project credentials
-        provider_credentials_str = oc_project_env.get("PROVIDER_CREDENTIALS")
+        # Parse provider credentials - check current env first (for subprocess handoff)
+        provider_credentials_str = os.environ.get("PROVIDER_CREDENTIALS")
+        if not provider_credentials_str:
+            provider_credentials_str = oc_project_env.get("PROVIDER_CREDENTIALS")
         if provider_credentials_str:
             try:
                 provider_credentials = parse_provider_credentials(

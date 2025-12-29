@@ -453,15 +453,12 @@ class ProviderConfig:
             return cred.is_valid()
 
         elif self.provider == AgentProvider.OPENCODE:
-            # OpenCode needs an LLM provider and potentially a credential
+            # OpenCode needs an LLM provider configured
             if not self.opencode_provider:
                 return False
-            # Check if credential exists and is valid for the LLM provider
-            cred = self.get_credential(self.opencode_provider)
-            if cred:
-                return cred.is_valid()
-            # OpenCode can work without explicit credentials for some providers
-            # (e.g., using OPENAI_API_KEY directly from env)
+            # OpenCode CLI handles its own authentication internally
+            # (reads API keys from its own config or environment variables)
+            # We don't require credentials at the Python layer
             return True
 
         return False
@@ -495,14 +492,9 @@ class ProviderConfig:
                     "OpenCode provider requires OPENCODE_PROVIDER to be set "
                     "(e.g., openai, anthropic, google)"
                 )
-            else:
-                cred = self.get_credential(self.opencode_provider)
-                if cred and not cred.is_valid():
-                    errors.extend(cred.get_validation_errors())
-
-            if not self.opencode_model:
-                # Model is optional but recommended
-                pass
+            # Note: OpenCode CLI handles its own authentication internally
+            # We don't validate credentials at the Python layer - OpenCode
+            # reads API keys from its own config or environment variables
 
         else:
             errors.append(f"Unknown agent provider: {self.provider}")
