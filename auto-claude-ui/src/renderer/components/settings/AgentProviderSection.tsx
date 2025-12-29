@@ -6,14 +6,13 @@
  * - Agent provider dropdown (Claude Code vs OpenCode)
  * - Provider status badge showing configuration status
  * - Global/project credential toggle
- * - Dynamic OpenCode provider selector (populated from global credentials)
- * - Model override field
- * - "Add Provider" button for adding new providers to global settings
+ * - Dynamic OpenCode provider/model selector (populated from `opencode models` CLI)
+ * - No API key management needed - OpenCode handles credentials
  * - Inline help tooltips for all fields
  */
 
 import * as React from 'react';
-import { Bot, HelpCircle, AlertCircle, Settings2 } from 'lucide-react';
+import { Bot, HelpCircle, AlertCircle, Settings2, RefreshCw, Loader2 } from 'lucide-react';
 import { Label } from '../ui/label';
 import { Input } from '../ui/input';
 import {
@@ -51,6 +50,14 @@ import type {
   ProviderStatus,
 } from '@shared/types/provider';
 import type { AppSettings } from '@shared/types/settings';
+import { Button } from '../ui/button';
+
+/** Model info from OpenCode CLI */
+interface OpenCodeModel {
+  provider: string;
+  model: string;
+  fullId: string;
+}
 
 export interface AgentProviderSectionProps {
   /** Current agent provider type (claude_code or opencode) */
@@ -162,10 +169,53 @@ export function AgentProviderSection({
   disabled = false,
   className,
 }: AgentProviderSectionProps) {
-  // Get configured providers from global settings
+  // State for dynamic OpenCode models from CLI
+  const [openCodeModels, setOpenCodeModels] = React.useState<OpenCodeModel[]>([]);
+  const [openCodeProviders, setOpenCodeProviders] = React.useState<string[]>([]);
+  const [isLoadingModels, setIsLoadingModels] = React.useState(false);
+  const [modelsError, setModelsError] = React.useState<string | null>(null);
+
+  // Fetch OpenCode models from CLI when component mounts or when switching to OpenCode
+  const fetchOpenCodeModels = React.useCallback(async () => {
+    if (!window.electronAPI?.getOpenCodeModels) {
+      // Fallback to legacy configured providers
+      return;
+    }
+
+    setIsLoadingModels(true);
+    setModelsError(null);
+
+    try {
+      const result = await window.electronAPI.getOpenCodeModels();
+      if (result.success && result.data) {
+        setOpenCodeModels(result.data.models || []);
+        setOpenCodeProviders(result.data.providers || []);
+      } else {
+        setModelsError(result.error || 'Failed to fetch models');
+      }
+    } catch (error) {
+      setModelsError(error instanceof Error ? error.message : 'Unknown error');
+    } finally {
+      setIsLoadingModels(false);
+    }
+  }, []);
+
+  // Note: Models are only fetched when user clicks the Refresh button
+  // No auto-fetch on mount to avoid unnecessary API calls
+
+  // Get configured providers from global settings (legacy fallback)
   const configuredProviders = React.useMemo(() => {
     return getConfiguredProviders(appSettings);
   }, [appSettings]);
+
+  // Use dynamic providers if available, otherwise fall back to configured
+  const availableProviders = openCodeProviders.length > 0 ? openCodeProviders : configuredProviders;
+
+  // Get models for currently selected provider
+  const modelsForProvider = React.useMemo(() => {
+    if (!opencodeProvider) return [];
+    return openCodeModels.filter(m => m.provider === opencodeProvider);
+  }, [openCodeModels, opencodeProvider]);
 
   // Get current provider status
   const { status: providerStatus, errorMessage } = React.useMemo(() => {
@@ -183,15 +233,19 @@ export function AgentProviderSection({
     const newProvider = value as AgentProviderType;
     onAgentProviderChange(newProvider);
 
-    // If switching to OpenCode and no provider selected, select first configured
-    if (newProvider === 'opencode' && !opencodeProvider && configuredProviders.length > 0) {
-      onOpencodeProviderChange(configuredProviders[0]);
+    // If switching to OpenCode and no provider selected, select first available
+    if (newProvider === 'opencode' && !opencodeProvider && availableProviders.length > 0) {
+      onOpencodeProviderChange(availableProviders[0]);
     }
   };
 
-  // Handle OpenCode provider selection
+  // Handle OpenCode provider selection (from dynamic list)
   const handleOpencodeProviderChange = (providerId: string) => {
+    // providerId is the exact provider ID from `opencode models` (e.g., "zai-coding-plan")
     onOpencodeProviderChange(providerId);
+
+    // Clear model selection when provider changes
+    onOpencodeModelChange('');
 
     // Update provider credentials store with the new selection
     const normalizedId = normalizeProviderId(providerId);
@@ -208,7 +262,12 @@ export function AgentProviderSection({
     }
   };
 
-  // Handle model override change
+  // Handle model selection (from dynamic list or manual input)
+  const handleModelSelect = (modelId: string) => {
+    onOpencodeModelChange(modelId);
+  };
+
+  // Handle manual model input
   const handleModelChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     onOpencodeModelChange(e.target.value || '');
   };
@@ -254,7 +313,8 @@ export function AgentProviderSection({
     : '';
 
   const isOpenCode = agentProvider === 'opencode';
-  const hasConfiguredProviders = configuredProviders.length > 0;
+  const hasAvailableProviders = availableProviders.length > 0;
+  const hasDynamicModels = openCodeModels.length > 0;
 
   return (
     <section
@@ -320,69 +380,121 @@ export function AgentProviderSection({
       {/* OpenCode-specific configuration */}
       {isOpenCode && (
         <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-4">
-          {/* No providers warning */}
-          {!hasConfiguredProviders && (
+          {/* Loading state */}
+          {isLoadingModels && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading available models from OpenCode...
+            </div>
+          )}
+
+          {/* Error state */}
+          {modelsError && !isLoadingModels && (
+            <div className="rounded-lg bg-destructive/10 border border-destructive/30 p-3">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-foreground">
+                    Failed to fetch OpenCode models
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {modelsError}
+                  </p>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="mt-2 h-7 text-xs"
+                    onClick={fetchOpenCodeModels}
+                  >
+                    <RefreshCw className="h-3 w-3 mr-1" />
+                    Retry
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* No providers warning (only if no dynamic models and not loading) */}
+          {!hasAvailableProviders && !isLoadingModels && !modelsError && (
             <div className="rounded-lg bg-warning/10 border border-warning/30 p-3">
               <div className="flex items-start gap-2">
                 <AlertCircle className="h-4 w-4 text-warning mt-0.5 shrink-0" />
                 <div className="flex-1">
                   <p className="text-sm font-medium text-foreground">
-                    No providers configured
+                    No providers available
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Add a provider in App Settings to use OpenCode.
+                    OpenCode CLI not found or no models configured.
+                    Make sure OpenCode is installed and configured.
                   </p>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="mt-2 h-7 text-xs"
+                    onClick={fetchOpenCodeModels}
+                  >
+                    <RefreshCw className="h-3 w-3 mr-1" />
+                    Refresh
+                  </Button>
                 </div>
               </div>
             </div>
           )}
 
           {/* OpenCode Provider Selector */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Label htmlFor="opencode-provider" className="text-sm font-medium">
-                  LLM Provider
-                </Label>
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <HelpCircle className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p className="max-w-xs">
-                        Select the LLM provider to use with OpenCode. Providers
-                        must be configured in App Settings first.
-                      </p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+          {hasAvailableProviders && !isLoadingModels && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="opencode-provider" className="text-sm font-medium">
+                    Provider
+                  </Label>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <HelpCircle className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p className="max-w-xs">
+                          Select the LLM provider from OpenCode. These are fetched
+                          dynamically from your OpenCode installation.
+                        </p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={fetchOpenCodeModels}
+                  disabled={isLoadingModels}
+                >
+                  <RefreshCw className={cn("h-3 w-3 mr-1", isLoadingModels && "animate-spin")} />
+                  Refresh
+                </Button>
               </div>
-              <AddProviderDialog
-                onAddProvider={handleAddProvider}
+              <Select
+                value={opencodeProvider || ''}
+                onValueChange={handleOpencodeProviderChange}
                 disabled={disabled}
-              />
-            </div>
-            <Select
-              value={opencodeProvider || ''}
-              onValueChange={handleOpencodeProviderChange}
-              disabled={disabled || !hasConfiguredProviders}
-            >
-              <SelectTrigger
-                id="opencode-provider"
-                data-testid="opencode-provider-select"
               >
-                <SelectValue placeholder="Select provider..." />
-              </SelectTrigger>
-              <SelectContent>
-                {configuredProviders.map((providerId) => (
-                  <SelectItem key={providerId} value={providerId}>
-                    {getProviderDisplayName(appSettings, providerId)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+                <SelectTrigger
+                  id="opencode-provider"
+                  data-testid="opencode-provider-select"
+                >
+                  <SelectValue placeholder="Select provider..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableProviders.map((providerId) => (
+                    <SelectItem key={providerId} value={providerId}>
+                      {providerId}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           {/* Credential Section - Only show when provider is selected */}
           {opencodeProvider && (
@@ -404,15 +516,14 @@ export function AgentProviderSection({
             />
           )}
 
-          {/* Model Override */}
-          {opencodeProvider && (
+          {/* Model Selection */}
+          {opencodeProvider && !isLoadingModels && (
             <div className="space-y-2" data-testid="model-section">
               <div className="flex items-center gap-2">
                 <Settings2 className="h-4 w-4 text-muted-foreground" />
                 <Label htmlFor="opencode-model" className="text-sm font-medium">
                   Model
                 </Label>
-                <span className="text-xs text-muted-foreground">(optional)</span>
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -420,26 +531,58 @@ export function AgentProviderSection({
                     </TooltipTrigger>
                     <TooltipContent>
                       <p className="max-w-xs">
-                        Override the default model for this provider. Leave
-                        empty to use the provider&apos;s default model.
+                        Select a model from the available options, or enter a
+                        custom model name.
                       </p>
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
               </div>
-              <Input
-                id="opencode-model"
-                type="text"
-                placeholder={
-                  globalCredential?.defaultModel
-                    ? `Default: ${globalCredential.defaultModel}`
-                    : 'e.g., gpt-4o, claude-3-sonnet'
-                }
-                value={opencodeModel || ''}
-                onChange={handleModelChange}
-                disabled={disabled}
-                data-testid="opencode-model-input"
-              />
+
+              {/* Show dropdown if we have dynamic models for this provider */}
+              {modelsForProvider.length > 0 ? (
+                <Select
+                  value={opencodeModel || ''}
+                  onValueChange={handleModelSelect}
+                  disabled={disabled}
+                >
+                  <SelectTrigger
+                    id="opencode-model"
+                    data-testid="opencode-model-select"
+                  >
+                    <SelectValue placeholder="Select model..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {modelsForProvider.map((m) => (
+                      <SelectItem key={m.fullId} value={m.model}>
+                        {m.model}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                /* Fallback to text input if no dynamic models */
+                <Input
+                  id="opencode-model"
+                  type="text"
+                  placeholder={
+                    globalCredential?.defaultModel
+                      ? `Default: ${globalCredential.defaultModel}`
+                      : 'e.g., gpt-4o, claude-3-sonnet'
+                  }
+                  value={opencodeModel || ''}
+                  onChange={handleModelChange}
+                  disabled={disabled}
+                  data-testid="opencode-model-input"
+                />
+              )}
+
+              {/* Show selected full ID for clarity */}
+              {opencodeProvider && opencodeModel && (
+                <p className="text-xs text-muted-foreground">
+                  Full model ID: <code className="bg-muted px-1 rounded">{opencodeProvider}/{opencodeModel}</code>
+                </p>
+              )}
             </div>
           )}
         </div>

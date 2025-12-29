@@ -149,9 +149,19 @@ def get_combined_env(project_dir: str) -> dict[str, str]:
 
                     break  # Use first configured provider
 
-    # Find project and load its .env file (overrides global settings)
+    # Find project and load its settings and .env file
     project = get_project_by_path(project_dir)
     if project:
+        # Load project settings (from projects.json) - highest priority for provider selection
+        project_settings = project.get("settings", {})
+        if project_settings.get("agentProvider"):
+            env["AGENT_PROVIDER"] = project_settings["agentProvider"]
+        if project_settings.get("opencodeProvider"):
+            env["OPENCODE_PROVIDER"] = project_settings["opencodeProvider"]
+        if project_settings.get("opencodeModel"):
+            env["OPENCODE_MODEL"] = project_settings["opencodeModel"]
+
+        # Load project .env file (for credentials like CLAUDE_CODE_OAUTH_TOKEN)
         auto_build_path = project.get("autoBuildPath")
         if auto_build_path:
             env_path = Path(project_dir) / auto_build_path / ".env"
@@ -159,9 +169,23 @@ def get_combined_env(project_dir: str) -> dict[str, str]:
                 try:
                     content = env_path.read_text()
                     project_env = parse_env_file(content)
-                    # Project .env overrides global settings
-                    env.update(project_env)
-                    logger.info(f"Loaded project .env from {env_path}")
+                    # Only update credentials from .env, not provider settings
+                    # Provider settings come from project.settings
+                    credential_keys = [
+                        "CLAUDE_CODE_OAUTH_TOKEN",
+                        "OPENAI_API_KEY",
+                        "GRAPHITI_ENABLED",
+                        "GRAPHITI_LLM_PROVIDER",
+                        "GRAPHITI_EMBEDDER_PROVIDER",
+                        "OPENAI_EMBEDDING_MODEL",
+                        "PROVIDER_CREDENTIALS",
+                        "LINEAR_API_KEY",
+                        "GITHUB_TOKEN",
+                    ]
+                    for key in credential_keys:
+                        if key in project_env:
+                            env[key] = project_env[key]
+                    logger.info(f"Loaded credentials from {env_path}")
                 except OSError as e:
                     logger.warning(f"Failed to read project .env: {e}")
 
@@ -177,43 +201,68 @@ def get_model_from_settings(project_dir: str) -> str | None:
     """
     Get the configured model from settings.
 
-    Checks project .env first, then global settings.
+    Checks project settings (projects.json) first, then .env, then global settings.
+    For OpenCode, returns full provider/model format (e.g., "zai-coding-plan/glm-4.7").
 
     Args:
         project_dir: Project directory path
 
     Returns:
-        Model identifier or None
+        Model identifier (provider/model format for OpenCode) or None
     """
-    # Check project .env first
+    provider = None
+    model = None
+
     project = get_project_by_path(project_dir)
     if project:
-        auto_build_path = project.get("autoBuildPath")
-        if auto_build_path:
-            env_path = Path(project_dir) / auto_build_path / ".env"
-            if env_path.exists():
-                try:
-                    content = env_path.read_text()
-                    project_env = parse_env_file(content)
-                    if project_env.get("OPENCODE_MODEL"):
-                        return project_env["OPENCODE_MODEL"]
-                    if project_env.get("AUTO_BUILD_MODEL"):
-                        return project_env["AUTO_BUILD_MODEL"]
-                except OSError:
-                    pass
+        # Check project settings first (from projects.json)
+        project_settings = project.get("settings", {})
+        if project_settings.get("opencodeProvider"):
+            provider = project_settings["opencodeProvider"]
+        if project_settings.get("opencodeModel"):
+            model = project_settings["opencodeModel"]
 
-    # Check global settings
+        # Fallback to .env file for model if not in project settings
+        if not model:
+            auto_build_path = project.get("autoBuildPath")
+            if auto_build_path:
+                env_path = Path(project_dir) / auto_build_path / ".env"
+                if env_path.exists():
+                    try:
+                        content = env_path.read_text()
+                        project_env = parse_env_file(content)
+                        if not provider and project_env.get("OPENCODE_PROVIDER"):
+                            provider = project_env["OPENCODE_PROVIDER"]
+                        if project_env.get("OPENCODE_MODEL"):
+                            model = project_env["OPENCODE_MODEL"]
+                        elif project_env.get("AUTO_BUILD_MODEL"):
+                            model = project_env["AUTO_BUILD_MODEL"]
+                    except OSError:
+                        pass
+
+    # Check global settings if not found
     global_settings = load_global_settings()
-    if global_settings.get("globalOpencodeModel"):
-        return global_settings["globalOpencodeModel"]
+    if not provider and global_settings.get("globalOpencodeProvider"):
+        provider = global_settings["globalOpencodeProvider"]
+    if not model and global_settings.get("globalOpencodeModel"):
+        model = global_settings["globalOpencodeModel"]
 
     # Check providerCredentials for defaultModel
-    provider_credentials = global_settings.get("providerCredentials", {})
-    for cred_data in provider_credentials.values():
-        if isinstance(cred_data, dict) and cred_data.get("defaultModel"):
-            return cred_data["defaultModel"]
+    if not model:
+        provider_credentials = global_settings.get("providerCredentials", {})
+        for cred_data in provider_credentials.values():
+            if isinstance(cred_data, dict) and cred_data.get("defaultModel"):
+                model = cred_data["defaultModel"]
+                break
 
-    return None
+    # Return full provider/model format for OpenCode
+    if provider and model:
+        # Check if model already includes provider prefix
+        if "/" in model:
+            return model
+        return f"{provider}/{model}"
+
+    return model
 
 
 class TaskProcess:
@@ -268,23 +317,26 @@ class TaskProcess:
                 "--force",  # Skip approval check
             ]
 
+            # Get combined environment (global settings + project .env)
+            combined_env = get_combined_env(project_dir)
+
             # Add optional flags
             if options:
-                if options.get("model"):
-                    args.extend(["--model", options["model"]])
                 if options.get("baseBranch"):
                     args.extend(["--base-branch", options["baseBranch"]])
                 if options.get("qaOnly"):
                     args.append("--qa")
 
-            # If no model specified in options, get from settings
-            if not options or not options.get("model"):
-                model = get_model_from_settings(project_dir)
-                if model:
-                    args.extend(["--model", model])
-
-            # Get combined environment (global settings + project .env)
-            combined_env = get_combined_env(project_dir)
+            # Only pass --model for Claude Code provider
+            # OpenCode uses OPENCODE_PROVIDER/OPENCODE_MODEL env vars instead
+            agent_provider = combined_env.get("AGENT_PROVIDER", "claude_code")
+            if agent_provider != "opencode":
+                if options and options.get("model"):
+                    args.extend(["--model", options["model"]])
+                elif not options or not options.get("model"):
+                    model = get_model_from_settings(project_dir)
+                    if model:
+                        args.extend(["--model", model])
 
             print(f"[IPC] Starting task {self.task_id}: {' '.join(args)}")
             print(
@@ -532,18 +584,35 @@ def get_running_tasks() -> list[dict[str, Any]]:
     """
     Get list of currently running tasks.
 
+    Includes both task execution processes and spec creation processes.
+
     Returns:
         List of running task info
     """
     running = []
+
+    # Check task execution processes
     for task_id, process in _task_processes.items():
         if process.is_running:
             running.append(
                 {
                     "taskId": task_id,
                     "status": "running",
+                    "phase": "execution",
                 }
             )
+
+    # Check spec creation processes
+    for task_id, process in _spec_processes.items():
+        if process.is_running:
+            running.append(
+                {
+                    "taskId": task_id,
+                    "status": "running",
+                    "phase": "spec_creation",
+                }
+            )
+
     return running
 
 
@@ -604,13 +673,16 @@ class SpecCreationProcess:
             if auto_approve:
                 args.append("--auto-approve")
 
-            # Get model from settings and pass to spec_runner
-            model = get_model_from_settings(project_dir)
-            if model:
-                args.extend(["--model", model])
-
             # Get combined environment (global settings + project .env)
             combined_env = get_combined_env(project_dir)
+
+            # Only pass --model for Claude Code provider
+            # OpenCode uses OPENCODE_PROVIDER/OPENCODE_MODEL env vars instead
+            agent_provider = combined_env.get("AGENT_PROVIDER", "claude_code")
+            if agent_provider != "opencode":
+                model = get_model_from_settings(project_dir)
+                if model:
+                    args.extend(["--model", model])
 
             print(f"[IPC] Starting spec creation {self.task_id}: {' '.join(args)}")
             print(
